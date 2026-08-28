@@ -1,0 +1,47 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Stem Studio",
+  "version": "0.1.0",
+  "identifier": "studio.stem.desktop",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Stem Studio",
+        "width": 1180,
+        "height": 760,
+        "minWidth": 700,
+        "minHeight": 520,
+        "resizable": true,
+        "fullscreen": false,
+        "dragDropEnabled": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost asset: http://asset.localhost; img-src 'self' asset: http://asset.localhost data:; style-src 'self' 'unsafe-inline'; font-src 'self'",
+      "assetProtocol": {
+        "enable": true,
+        "scope": ["$APPDATA/projects/**"]
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["dmg"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "category": "Music",
+    "shortDescription": "Separate and mix audio stems",
+    "longDescription": "A synchronized four-stem audio workstation powered by Demucs."
+  }
+}

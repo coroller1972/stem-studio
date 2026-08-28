@@ -1,0 +1,119 @@
+{
+  "schemaVersion": 1,
+  "regressionRules": {
+    "noteF1": {
+      "direction": "higher",
+      "tolerance": 0.02
+    },
+    "onsetF1": {
+      "direction": "higher",
+      "tolerance": 0.02
+    },
+    "pitchAccuracyOnMatchedOnsets": {
+      "direction": "higher",
+      "tolerance": 0.02
+    },
+    "shortNoteRecall": {
+      "direction": "higher",
+      "tolerance": 0.03
+    },
+    "repeatedNoteRecall": {
+      "direction": "higher",
+      "tolerance": 0.03
+    },
+    "lowBRecall": {
+      "direction": "higher",
+      "tolerance": 0.03
+    },
+    "octaveErrorRate": {
+      "direction": "lower",
+      "tolerance": 0.02
+    },
+    "medianOnsetErrorSeconds": {
+      "direction": "lower",
+      "tolerance": 0.01
+    },
+    "medianDurationErrorSeconds": {
+      "direction": "lower",
+      "tolerance": 0.03
+    }
+  },
+  "results": [
+    {
+      "caseId": "bass-corrected-36-bars",
+      "engineId": "basic-pitch",
+      "referenceBpm": 150.08,
+      "onsetToleranceSeconds": 0.08,
+      "alignment": {
+        "offsetSeconds": 0.07937954761900376,
+        "exactPitchMatches": 111,
+        "medianOnsetErrorSeconds": 0.04107743197283398
+      },
+      "metrics": {
+        "referenceNoteCount": 208,
+        "predictionNoteCount": 169,
+        "exactPitchMatches": 92,
+        "onsetMatches": 122,
+        "notePrecision": 0.5443786982248521,
+        "noteRecall": 0.4423076923076923,
+        "noteF1": 0.4880636604774536,
+        "onsetPrecision": 0.7218934911242604,
+        "onsetRecall": 0.5865384615384616,
+        "onsetF1": 0.6472148541114059,
+        "pitchAccuracyOnMatchedOnsets": 0.7540983606557377,
+        "octaveErrors": 30,
+        "octaveErrorsUp": 29,
+        "octaveErrorsDown": 1,
+        "octaveErrorRate": 0.2459016393442623,
+        "medianOnsetErrorSeconds": 0.03161104251695335,
+        "p95OnsetErrorSeconds": 0.07237402834471673,
+        "medianDurationErrorSeconds": 0.06337210770974977,
+        "medianDurationIoU": 0.6411197732284931,
+        "shortNoteCount": 0,
+        "shortNoteRecall": 0.0,
+        "repeatedNoteCount": 120,
+        "repeatedNoteRecall": 0.23333333333333334,
+        "lowBCount": 0,
+        "lowBRecall": 0.0
+      }
+    },
+    {
+      "caseId": "bass-corrected-36-bars",
+      "engineId": "torchcrepe",
+      "referenceBpm": 150.08,
+      "onsetToleranceSeconds": 0.08,
+      "alignment": {
+        "offsetSeconds": 0.07937954761900376,
+        "exactPitchMatches": 114,
+        "medianOnsetErrorSeconds": 0.05990245238087866
+      },
+      "metrics": {
+        "referenceNoteCount": 208,
+        "predictionNoteCount": 173,
+        "exactPitchMatches": 86,
+        "onsetMatches": 117,
+        "notePrecision": 0.49710982658959535,
+        "noteRecall": 0.41346153846153844,
+        "noteF1": 0.45144356955380577,
+        "onsetPrecision": 0.6763005780346821,
+        "onsetRecall": 0.5625,
+        "onsetF1": 0.6141732283464566,
+        "pitchAccuracyOnMatchedOnsets": 0.7264957264957265,
+        "octaveErrors": 20,
+        "octaveErrorsUp": 18,
+        "octaveErrorsDown": 2,
+        "octaveErrorRate": 0.17094017094017094,
+        "medianOnsetErrorSeconds": 0.04280920238097208,
+        "p95OnsetErrorSeconds": 0.07489145238092476,
+        "medianDurationErrorSeconds": 0.059893500000001154,
+        "medianDurationIoU": 0.5607635599920617,
+        "shortNoteCount": 0,
+        "shortNoteRecall": 0.0,
+        "repeatedNoteCount": 120,
+        "repeatedNoteRecall": 0.39166666666666666,
+        "lowBCount": 0,
+        "lowBRecall": 0.0
+      }
+    }
+  ]
+}

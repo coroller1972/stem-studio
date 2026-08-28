@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: engine/requirements.lock
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - name: Install frontend
+        working-directory: app
+        run: npm ci
+      - name: Frontend build and coverage
+        working-directory: app
+        run: |
+          npm run build
+          npm run test:coverage
+      - name: Install engine
+        run: python -m pip install -r engine/requirements.lock
+      - name: Verify engine environment
+        run: python -m pip check
+      - name: Engine tests
+        env:
+          PYTHONPATH: engine
+        run: python -m unittest discover -s engine/tests
+      - name: Rust formatting and tests
+        working-directory: app/src-tauri
+        run: |
+          cargo fmt --check
+          cargo test --locked
+      - name: Generate SBOM
+        run: python scripts/generate-sbom.py --output stem-studio.cdx.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: stem-studio-sbom
+          path: stem-studio.cdx.json

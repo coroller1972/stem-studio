@@ -1,0 +1,17 @@
+node_modules/
+app/node_modules/
+app/dist/
+app/src-tauri/target/
+engine/.venv/
+engine/.venv*/
+engine/__pycache__/
+engine/dist/
+engine/build/
+app/src-tauri/binaries/
+*.pyc
+.DS_Store
+coverage/
+*.tsbuildinfo
+stem-studio-ffmpeg/
+bass.wav
+AUDIT.node_modules

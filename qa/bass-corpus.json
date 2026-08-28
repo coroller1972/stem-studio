@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "cases": [
+    {
+      "id": "bass-corrected-36-bars",
+      "description": "First 36 corrected measures supplied for the metal bass QA track.",
+      "audioPath": "../bass.wav",
+      "referenceMidiPath": "~/Downloads/bass-corrigé.mid",
+      "referenceBpm": 150.08,
+      "onsetToleranceSeconds": 0.08,
+      "alignmentOffsetSeconds": 0.07937954761900376,
+      "tuning": [23, 28, 33, 38, 43],
+      "predictions": {}
+    }
+  ]
+}

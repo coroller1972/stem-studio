@@ -1,5 +1,5 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { spectrogramRange } from "./spectrogram";
+import { DEFAULT_FFT_SIZE, SPECTROGRAM_BATCH_COLUMNS, spectrogramFrameStart, spectrogramRange } from "./spectrogram";
 import { calculateEffectiveGains, clampVolume } from "../domain/mixer";
 import {
   STEM_NAMES,
@@ -12,7 +12,7 @@ import {
 import { clampTime } from "../domain/transport";
 
 type AudioContextFactory = () => AudioContext;
-type BinaryLoader = (path: string) => Promise<ArrayBuffer>;
+type BinaryLoader = (path: string, signal?: AbortSignal) => Promise<ArrayBuffer>;
 
 const START_LATENCY_SECONDS = 0.05;
 const MAX_AUDIO_DURATION_SECONDS = 30 * 60;
@@ -31,9 +31,10 @@ export class AudioEngine {
   private playing = false;
   private generation = 0;
   private loadGeneration = 0;
+  private loadController: AbortController | null = null;
   private loadedDuration = 0;
   private spectrograms: Partial<Record<SpectralStemName, Promise<SpectrogramData>>> = {};
-  private spectrogramWorkers = new Set<Worker>();
+  private spectrogramWorkers = new Map<Worker, () => void>();
 
   constructor(
     contextFactory: AudioContextFactory = () => new AudioContext(),
@@ -58,26 +59,34 @@ export class AudioEngine {
   }
 
   async load(stems: StemPaths): Promise<Record<StemName, Float32Array>> {
-    this.stopSources();
-    this.loadGeneration += 1;
-    this.clearSpectrograms();
+    this.clear();
+    const loadGeneration = this.loadGeneration;
+    const controller = new AbortController();
+    this.loadController = controller;
     const context = this.ensureContext();
-    const decoded = await Promise.all(
-      STEM_NAMES.map(async (name) => {
-        const binary = await this.binaryLoader(stems[name]);
-        const buffer = await context.decodeAudioData(binary.slice(0));
-        return [name, buffer] as const;
-      }),
-    );
+    const decoded: Array<readonly [StemName, AudioBuffer]> = [];
+    const assertCurrentLoad = () => {
+      if (loadGeneration !== this.loadGeneration) {
+        throw new Error("Audio loading was cancelled because the project changed.");
+      }
+    };
+    // Decode one stem at a time to avoid retaining four encoded WAVs and their copies.
+    for (const name of STEM_NAMES) {
+      const binary = await this.binaryLoader(stems[name], controller.signal);
+      assertCurrentLoad();
+      const buffer = await context.decodeAudioData(binary);
+      assertCurrentLoad();
+      if (!Number.isFinite(buffer.duration) || buffer.duration <= 0) {
+        throw new Error("The audio stem has an invalid duration.");
+      }
+      if (buffer.duration > MAX_AUDIO_DURATION_SECONDS) {
+        throw new Error("Stem Studio supports projects up to 30 minutes long.");
+      }
+      decoded.push([name, buffer]);
+    }
 
     this.buffers = Object.fromEntries(decoded) as Record<StemName, AudioBuffer>;
     this.loadedDuration = Math.min(...decoded.map(([, buffer]) => buffer.duration));
-    if (this.loadedDuration > MAX_AUDIO_DURATION_SECONDS) {
-      this.buffers = {};
-      this.loadedDuration = 0;
-      throw new Error("Stem Studio supports projects up to 30 minutes long.");
-    }
-    this.offsetSeconds = 0;
 
     for (const name of STEM_NAMES) this.gains[name]?.disconnect();
     this.gains = {};
@@ -104,27 +113,40 @@ export class AudioEngine {
     if (!buffer) return Promise.reject(new Error(`The ${name} stem is not loaded.`));
 
     const loadGeneration = this.loadGeneration;
-    const samples = mixChannels(buffer);
     const width = Math.min(1_600, Math.max(320, Math.ceil(buffer.duration * 8)));
     const range = spectrogramRange(name);
     const worker = new Worker(new URL("./spectrogram.worker.ts", import.meta.url), { type: "module" });
-    this.spectrogramWorkers.add(worker);
 
     const request = new Promise<SpectrogramData>((resolve, reject) => {
       const finish = () => {
         worker.terminate();
         this.spectrogramWorkers.delete(worker);
       };
+      this.spectrogramWorkers.set(worker, () => {
+        finish();
+        reject(new Error("The frequency view was cancelled because the audio project changed."));
+      });
       worker.onmessage = (event: MessageEvent<
+        | { type: "frames-needed"; column: number; count: number }
         | { type: "result"; result: SpectrogramData }
         | { type: "error"; message: string }
       >) => {
+        if (event.data.type === "frames-needed" && loadGeneration === this.loadGeneration) {
+          try {
+            const samples = extractSpectrogramFrames(buffer, event.data.column, event.data.count, width);
+            worker.postMessage({ type: "frames", samples: samples.buffer }, [samples.buffer]);
+          } catch (error) {
+            finish();
+            reject(error);
+          }
+          return;
+        }
         finish();
         if (loadGeneration !== this.loadGeneration) {
           reject(new Error("The audio project changed while the frequency view was being prepared."));
         } else if (event.data.type === "result") {
           resolve(event.data.result);
-        } else {
+        } else if (event.data.type === "error") {
           reject(new Error(event.data.message));
         }
       };
@@ -132,10 +154,12 @@ export class AudioEngine {
         finish();
         reject(new Error(event.message || "Unable to calculate the frequency view."));
       };
-      worker.postMessage(
-        { samples: samples.buffer, sampleRate: buffer.sampleRate, width, ...range },
-        [samples.buffer],
-      );
+      try {
+        worker.postMessage({ type: "start", sampleRate: buffer.sampleRate, width, ...range });
+      } catch (error) {
+        finish();
+        reject(error);
+      }
     });
 
     this.spectrograms[name] = request;
@@ -148,7 +172,9 @@ export class AudioEngine {
   async play(seconds = this.offsetSeconds): Promise<void> {
     if (!this.hasAllBuffers() || this.loadedDuration <= 0) return;
     const context = this.ensureContext();
+    const playGeneration = ++this.generation;
     await context.resume();
+    if (playGeneration !== this.generation) return;
     const offset = clampTime(seconds, this.loadedDuration);
     if (offset >= this.loadedDuration) return;
 
@@ -212,7 +238,9 @@ export class AudioEngine {
     gain.setTargetAtTime(this.masterVolume, context.currentTime, 0.008);
   }
 
-  async dispose(): Promise<void> {
+  clear(): void {
+    this.loadController?.abort();
+    this.loadController = null;
     this.stopSources();
     this.loadGeneration += 1;
     this.clearSpectrograms();
@@ -222,8 +250,14 @@ export class AudioEngine {
     this.masterGain = null;
     this.buffers = {};
     this.loadedDuration = 0;
-    if (this.context) await this.context.close();
+    this.offsetSeconds = 0;
+  }
+
+  async dispose(): Promise<void> {
+    this.clear();
+    const context = this.context;
     this.context = null;
+    if (context) await context.close();
   }
 
   private ensureContext(): AudioContext {
@@ -253,15 +287,15 @@ export class AudioEngine {
   }
 
   private clearSpectrograms(): void {
-    for (const worker of this.spectrogramWorkers) worker.terminate();
+    for (const cancel of this.spectrogramWorkers.values()) cancel();
     this.spectrogramWorkers.clear();
     this.spectrograms = {};
   }
 }
 
-async function loadBinary(path: string): Promise<ArrayBuffer> {
+async function loadBinary(path: string, signal?: AbortSignal): Promise<ArrayBuffer> {
   const source = isTauriRuntime() ? convertFileSrc(path) : path;
-  const response = await fetch(source);
+  const response = await fetch(source, { signal: signal ?? null });
   if (!response.ok) throw new Error(`Unable to read audio stem (${response.status}).`);
   return response.arrayBuffer();
 }
@@ -270,18 +304,21 @@ function isTauriRuntime(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
-function extractPeaks(buffer: AudioBuffer, targetLength: number): Float32Array {
-  const channel = mixChannels(buffer);
-  const count = Math.min(targetLength, channel.length);
+export function extractPeaks(buffer: AudioBuffer, targetLength: number): Float32Array {
+  const channels = audioChannels(buffer);
+  const length = buffer.length || channels[0]!.length;
+  const count = Math.min(targetLength, length);
   const peaks = new Float32Array(count);
-  const stride = channel.length / count;
+  const stride = length / count;
 
   for (let index = 0; index < count; index += 1) {
     const start = Math.floor(index * stride);
     const end = Math.max(start + 1, Math.floor((index + 1) * stride));
     let peak = 0;
     for (let sample = start; sample < end; sample += 1) {
-      peak = Math.max(peak, Math.abs(channel[sample] ?? 0));
+      let mono = 0;
+      for (const channel of channels) mono = Math.fround(mono + (channel[sample] ?? 0) / channels.length);
+      peak = Math.max(peak, Math.abs(mono));
     }
     peaks[index] = peak;
   }
@@ -299,4 +336,28 @@ export function mixChannels(buffer: AudioBuffer): Float32Array {
     }
   }
   return mono;
+}
+
+function audioChannels(buffer: AudioBuffer): Float32Array[] {
+  return Array.from({ length: Math.max(1, buffer.numberOfChannels || 1) }, (_, index) => buffer.getChannelData(index));
+}
+
+// At most 1 MiB of PCM per worker request, independent of track duration.
+export function extractSpectrogramFrames(buffer: AudioBuffer, column: number, count: number, width: number): Float32Array {
+  if (!Number.isInteger(column) || !Number.isInteger(count) || column < 0 || count < 1 || count > SPECTROGRAM_BATCH_COLUMNS || column + count > width) {
+    throw new Error("Invalid frequency analysis window request.");
+  }
+  const channels = audioChannels(buffer);
+  const length = buffer.length || channels[0]!.length;
+  const frames = new Float32Array(count * DEFAULT_FFT_SIZE);
+  for (let frame = 0; frame < count; frame += 1) {
+    const start = spectrogramFrameStart(length, column + frame, width);
+    for (const channel of channels) {
+      for (let index = 0; index < DEFAULT_FFT_SIZE; index += 1) {
+        const target = frame * DEFAULT_FFT_SIZE + index;
+        frames[target] = frames[target]! + (channel[start + index] ?? 0) / channels.length;
+      }
+    }
+  }
+  return frames;
 }

@@ -11,6 +11,9 @@ import type {
   TranscriptionTrack,
 } from "../domain/types";
 
+import { useShallow } from "zustand/react/shallow";
+import { useProjectStore } from "../state/projectStore";
+
 export type StudioTab = "mixer" | "frequency" | "bass" | "drums";
 
 interface StudioTabsProps {
@@ -41,7 +44,7 @@ function StatusDot({ status }: { status: "idle" | "processing" | "ready" | "erro
 
 interface BassViewProps {
   state: TrackTranscriptionState<BassTranscription>;
-  currentTime: number;
+  currentTime?: number;
   followPlayback: boolean;
   tuning: BassTuning;
   onTuningChange: (tuning: BassTuning) => void;
@@ -68,6 +71,14 @@ export function BassTranscriptionView({
   onSeek,
   onExport,
 }: BassViewProps) {
+  const [activeId, activeMeasure] = useProjectStore(useShallow((store) => {
+    const transcription = state.result?.transcription;
+    const time = currentTime ?? store.currentTime;
+    return [
+      transcription?.events.find((event) => time >= event.detectedStartSeconds && time < event.detectedEndSeconds)?.id,
+      transcription ? measureAtTime(time, transcription.tempoMap) : 1,
+    ] as const;
+  }));
   if (!state.result) {
     return (
       <EmptyTranscription
@@ -87,9 +98,6 @@ export function BassTranscriptionView({
     );
   }
   const { transcription, midiFile, musicXmlFile } = state.result;
-  const activeId = transcription.events.find(
-    (event) => currentTime >= event.detectedStartSeconds && currentTime < event.detectedEndSeconds,
-  )?.id;
   return (
     <section className="transcription-view" aria-label="Bass transcription">
       <TranscriptionHeader
@@ -121,7 +129,7 @@ export function BassTranscriptionView({
       <BassTab
         transcription={transcription}
         activeId={activeId}
-        activeMeasure={measureAtTime(currentTime, transcription.tempoMap)}
+        activeMeasure={activeMeasure}
         followPlayback={followPlayback}
         onSeek={onSeek}
       />
@@ -132,7 +140,7 @@ export function BassTranscriptionView({
 
 interface DrumViewProps {
   state: TrackTranscriptionState<DrumTranscription>;
-  currentTime: number;
+  currentTime?: number;
   followPlayback: boolean;
   onTranscribe: () => void;
   startMarkerSeconds: number;
@@ -151,13 +159,18 @@ export function DrumTranscriptionView({
   onSeek,
   onExport,
 }: DrumViewProps) {
+  const [activeId, activeMeasure] = useProjectStore(useShallow((store) => {
+    const transcription = state.result?.transcription;
+    const time = currentTime ?? store.currentTime;
+    return [
+      transcription?.events.find((event) => Math.abs(time - event.detectedTimeSeconds) < 0.08)?.id,
+      transcription ? measureAtTime(time, transcription.tempoMap) : 1,
+    ] as const;
+  }));
   if (!state.result) {
     return <EmptyTranscription track="drums" state={state} onTranscribe={onTranscribe} />;
   }
   const { transcription, midiFile, musicXmlFile } = state.result;
-  const activeId = transcription.events.find(
-    (event) => Math.abs(currentTime - event.detectedTimeSeconds) < 0.08,
-  )?.id;
   return (
     <section className="transcription-view" aria-label="Drum transcription">
       <TranscriptionHeader
@@ -180,7 +193,7 @@ export function DrumTranscriptionView({
       <DrumGrid
         transcription={transcription}
         activeId={activeId}
-        activeMeasure={measureAtTime(currentTime, transcription.tempoMap)}
+        activeMeasure={activeMeasure}
         followPlayback={followPlayback}
         onSeek={onSeek}
       />

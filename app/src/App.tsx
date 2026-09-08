@@ -34,6 +34,7 @@ import { isTauriRuntime, TauriSeparationService } from "./services/separationSer
 import { TauriSessionService } from "./services/sessionService";
 import { TauriTranscriptionService } from "./services/transcriptionService";
 import { useProjectStore } from "./state/projectStore";
+import { ProjectOperations } from "./services/projectOperations";
 
 const AUDIO_EXTENSION = /\.(mp3|wav)$/i;
 
@@ -42,12 +43,14 @@ export default function App() {
   const sessionService = useMemo(() => new TauriSessionService(), []);
   const transcriptionService = useMemo(() => new TauriTranscriptionService(), []);
   const audio = useAudioEngine();
+  const operations = useMemo(() => new ProjectOperations(), []);
+  const [projectBusy, setProjectBusy] = useState(false);
+  useEffect(() => () => operations.dispose(), [operations]);
   const state = useProjectStore(useShallow((store) => ({
     status: store.status,
     progress: store.progress,
     statusMessage: store.statusMessage,
     errorMessage: store.errorMessage,
-    currentTime: store.currentTime,
     duration: store.duration,
     startMarkerSeconds: store.startMarkerSeconds,
     masterVolume: store.masterVolume,
@@ -101,40 +104,55 @@ export default function App() {
   const [frequencyStem, setFrequencyStem] = useState<SpectralStemName>("vocals");
 
   const importPath = useCallback(
-    async (path: string) => {
+    async (path: string, signal: AbortSignal) => {
+      if (!operations.isCurrent(signal)) return;
       if (!AUDIO_EXTENSION.test(path)) {
-        setError("Please choose an MP3 or WAV audio file.");
+        setSessionFeedback({ kind: "error", message: "Please choose an MP3 or WAV audio file." });
         return;
       }
+      operations.projectChanged();
+      audio.clear();
       beginImport(path);
       setActiveTab("mixer");
       try {
         const result = await service.separate(path, quality, (event) => {
+          if (!operations.isCurrent(signal)) return;
           if (event.type === "progress") setProgress(event.progress, event.message);
           if (event.type === "error") setError(event.message);
-        });
+        }, signal);
+        if (!operations.isCurrent(signal)) return;
         setSeparated(result.projectPath, result.stems, result.qualityProfile);
-        await audio.load(result.stems);
+        await audio.load(result.stems, signal);
       } catch (error) {
+        if (!operations.isCurrent(signal)) return;
         const message = error instanceof Error ? error.message : String(error);
-        if (message.toLowerCase().includes("cancel")) {
-          reset();
-          return;
-        }
-        setError(toUserMessage(message));
+        if (message.toLowerCase().includes("cancel")) reset();
+        else setError(toUserMessage(message));
       }
     },
-    [audio, beginImport, quality, reset, service, setError, setProgress, setSeparated],
+    [audio, beginImport, operations, quality, reset, service, setError, setProgress, setSeparated],
   );
 
-  const chooseFile = useCallback(async () => {
-    if (!isTauriRuntime()) {
-      setError("File import is available in the Tauri desktop app. Run npm run tauri dev.");
-      return;
+  const runImport = useCallback(async (path?: string) => {
+    const signal = operations.begin();
+    if (!signal) return;
+    setProjectBusy(true);
+    try {
+      if (!path && !isTauriRuntime()) {
+        setError("File import is available in the Tauri desktop app. Run npm run tauri dev.");
+        return;
+      }
+      const selectedPath = path ?? await service.chooseFile();
+      if (selectedPath && operations.isCurrent(signal)) await importPath(selectedPath, signal);
+    } catch (error) {
+      if (operations.isCurrent(signal)) setSessionFeedback({ kind: "error", message: toSessionMessage(error, "Unable to open the audio file.") });
+    } finally {
+      operations.finish(signal);
+      setProjectBusy(operations.busy);
     }
-    const path = await service.chooseFile();
-    if (path) await importPath(path);
-  }, [importPath, service, setError]);
+  }, [importPath, operations, service, setError]);
+
+  const chooseFile = useCallback(() => runImport(), [runImport]);
 
   const saveSession = useCallback(async () => {
     if (!isTauriRuntime()) {
@@ -143,10 +161,13 @@ export default function App() {
     }
     const snapshot = useProjectStore.getState();
     if (snapshot.status !== "ready" || !snapshot.projectPath || !snapshot.source) return;
+    const signal = operations.begin();
+    if (!signal) return;
+    setProjectBusy(true);
     try {
       const sessionPath =
         snapshot.sessionPath ?? (await sessionService.chooseSessionPath(snapshot.source.name));
-      if (!sessionPath) return;
+      if (!sessionPath || !operations.isCurrent(signal)) return;
       const result = await sessionService.save(
         snapshot.projectPath,
         sessionPath,
@@ -159,22 +180,33 @@ export default function App() {
           tracks: snapshot.tracks,
         },
       );
+      if (!operations.isCurrent(signal)) return;
       setSavedSession(result.sessionPath);
       setSessionFeedback({ kind: "success", message: `Session saved in ${result.sessionPath}` });
     } catch (error) {
+      if (!operations.isCurrent(signal)) return;
       setSessionFeedback({ kind: "error", message: toSessionMessage(error, "Unable to save session.") });
+    } finally {
+      operations.finish(signal);
+      setProjectBusy(operations.busy);
     }
-  }, [quality, sessionService, setSavedSession]);
+  }, [operations, quality, sessionService, setSavedSession]);
 
   const openSession = useCallback(async () => {
     if (!isTauriRuntime()) {
       setSessionFeedback({ kind: "error", message: "Sessions are available in the Tauri desktop app." });
       return;
     }
+    const signal = operations.begin();
+    if (!signal) return;
+    setProjectBusy(true);
     try {
       const manifestPath = await sessionService.chooseManifest();
-      if (!manifestPath) return;
+      if (!manifestPath || !operations.isCurrent(signal)) return;
       const restored = await sessionService.load(manifestPath);
+      if (!operations.isCurrent(signal)) return;
+      operations.projectChanged();
+      audio.clear();
       restoreSession(
         restored.manifestPath,
         restored.sessionPath,
@@ -191,27 +223,35 @@ export default function App() {
       const restoredBassModel = restored.transcriptions.bass?.transcription.modelId;
       if (restoredBassModel?.startsWith("torchcrepe")) setBassEngine("torchcrepe");
       else if (restoredBassModel?.startsWith("spotify-basic-pitch")) setBassEngine("basic-pitch");
-      await audio.load(restored.stems);
+      await audio.load(restored.stems, signal);
+      if (!operations.isCurrent(signal)) return;
       await audio.seek(restored.state.currentTimeSeconds);
+      if (!operations.isCurrent(signal)) return;
       setSessionFeedback({ kind: "success", message: `Session restored: ${restored.sourceName}` });
     } catch (error) {
+      if (!operations.isCurrent(signal)) return;
       const snapshot = useProjectStore.getState();
       if (snapshot.status === "loading") {
         snapshot.setError(toSessionMessage(error, "Unable to load the saved audio stems."));
       } else {
         setSessionFeedback({ kind: "error", message: toSessionMessage(error, "Unable to open session.") });
       }
+    } finally {
+      operations.finish(signal);
+      setProjectBusy(operations.busy);
     }
-  }, [audio, restoreSession, sessionService]);
+  }, [audio, operations, restoreSession, sessionService]);
 
   const transcribe = useCallback(
     async (track: TranscriptionTrack) => {
       const snapshot = useProjectStore.getState();
       if (snapshot.status !== "ready" || !snapshot.projectPath) return;
+      const version = operations.version;
+      const isCurrent = () => operations.version === version;
       beginTranscription(track);
       setActiveTab(track);
       const onEvent = (event: import("./domain/types").TranscriptionEvent) => {
-        if (event.type === "transcription_progress" && event.track === track) {
+        if (isCurrent() && event.type === "transcription_progress" && event.track === track) {
           setTranscriptionProgress(track, event.stage, event.progress, event.message);
         }
       };
@@ -224,18 +264,20 @@ export default function App() {
             bassTuning,
             bassEngine,
           );
-          setBassTranscription(result);
+          if (isCurrent()) setBassTranscription(result);
         } else {
           const result = await transcriptionService.transcribe(snapshot.projectPath, "drums", onEvent);
-          setDrumTranscription(result);
+          if (isCurrent()) setDrumTranscription(result);
         }
       } catch (error) {
+        if (!isCurrent()) return;
         const message = error instanceof Error ? error.message : String(error);
         setTranscriptionError(track, message || `${track} transcription failed.`);
       }
     },
     [
       beginTranscription,
+      operations,
       bassEngine,
       bassTuning,
       setBassTranscription,
@@ -250,9 +292,11 @@ export default function App() {
     async (track: TranscriptionTrack, bpm: number, firstMeasureSeconds: number) => {
       const snapshot = useProjectStore.getState();
       if (snapshot.status !== "ready" || !snapshot.projectPath) return;
+      const version = operations.version;
+      const isCurrent = () => operations.version === version;
       beginTranscription(track);
       const onEvent = (event: import("./domain/types").TranscriptionEvent) => {
-        if (event.type === "transcription_progress" && event.track === track) {
+        if (isCurrent() && event.type === "transcription_progress" && event.track === track) {
           setTranscriptionProgress(track, event.stage, event.progress, event.message);
         }
       };
@@ -265,7 +309,7 @@ export default function App() {
             firstMeasureSeconds,
             onEvent,
           );
-          setBassTranscription(result);
+          if (isCurrent()) setBassTranscription(result);
         } else {
           const result = await transcriptionService.requantize(
             snapshot.projectPath,
@@ -274,15 +318,17 @@ export default function App() {
             firstMeasureSeconds,
             onEvent,
           );
-          setDrumTranscription(result);
+          if (isCurrent()) setDrumTranscription(result);
         }
       } catch (error) {
+        if (!isCurrent()) return;
         const message = error instanceof Error ? error.message : String(error);
         setTranscriptionError(track, message || `Unable to update ${track} timing.`);
       }
     },
     [
       beginTranscription,
+      operations,
       setBassTranscription,
       setDrumTranscription,
       setTranscriptionError,
@@ -305,31 +351,42 @@ export default function App() {
 
   const cancel = useCallback(async () => {
     try {
-      await service.cancel();
+      await operations.cancel(async () => {
+        audio.clear();
+        if (useProjectStore.getState().status === "separating") await service.cancel();
+      });
       reset();
     } catch {
       setError("Unable to stop the separation process cleanly.");
+    } finally {
+      setProjectBusy(operations.busy);
     }
-  }, [reset, service, setError]);
+  }, [audio, operations, reset, service, setError]);
 
   useEffect(() => {
     if (!isTauriRuntime()) return;
+    let disposed = false;
     let cleanup: (() => void) | undefined;
     void getCurrentWebview()
       .onDragDropEvent((event) => {
+        if (disposed) return;
         if (event.payload.type === "over") setIsDragging(true);
         if (event.payload.type === "leave") setIsDragging(false);
         if (event.payload.type === "drop") {
           setIsDragging(false);
           const [path] = event.payload.paths;
-          if (path && state.status !== "separating") void importPath(path);
+          if (path) void runImport(path);
         }
       })
       .then((unlisten) => {
-        cleanup = unlisten;
+        if (disposed) unlisten();
+        else cleanup = unlisten;
+      })
+      .catch((error) => {
+        if (!disposed) setSessionFeedback({ kind: "error", message: toSessionMessage(error, "Unable to enable file drop.") });
       });
-    return () => cleanup?.();
-  }, [importPath, state.status]);
+    return () => { disposed = true; cleanup?.(); };
+  }, [runImport]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -389,7 +446,7 @@ export default function App() {
       <Header
         fileName={state.source?.name ?? null}
         quality={quality}
-        disabled={state.status === "separating" || state.status === "loading"}
+        disabled={projectBusy || state.status === "separating" || state.status === "loading"}
         canSaveSession={state.status === "ready"}
         onImport={() => void chooseFile()}
         onOpenSession={() => void openSession()}
@@ -405,7 +462,7 @@ export default function App() {
           progress={state.status === "loading" ? 1 : state.progress}
           message={state.statusMessage}
           quality={quality}
-          onCancel={state.status === "separating" ? () => void cancel() : null}
+          onCancel={() => void cancel()}
         />
       ) : null}
       {state.status === "error" ? (
@@ -423,7 +480,6 @@ export default function App() {
             {activeTab === "mixer" ? (
               <Timeline
                 duration={state.duration}
-                currentTime={state.currentTime}
                 startMarkerSeconds={state.startMarkerSeconds}
                 tracks={state.tracks}
                 waveforms={state.waveforms}
@@ -436,7 +492,6 @@ export default function App() {
             ) : activeTab === "frequency" ? (
               <FrequencyView
                 duration={state.duration}
-                currentTime={state.currentTime}
                 followPlayback={state.transportStatus === "playing"}
                 selectedStem={frequencyStem}
                 onStemChange={setFrequencyStem}
@@ -448,7 +503,6 @@ export default function App() {
             ) : activeTab === "bass" ? (
               <BassTranscriptionView
                 state={state.transcriptions.bass}
-                currentTime={state.currentTime}
                 followPlayback={state.transportStatus === "playing"}
                 tuning={bassTuning}
                 onTuningChange={setBassTuning}
@@ -465,7 +519,6 @@ export default function App() {
             ) : (
               <DrumTranscriptionView
                 state={state.transcriptions.drums}
-                currentTime={state.currentTime}
                 followPlayback={state.transportStatus === "playing"}
                 onTranscribe={() => void transcribe("drums")}
                 startMarkerSeconds={state.startMarkerSeconds}
@@ -479,14 +532,13 @@ export default function App() {
           </div>
           <Transport
             status={state.transportStatus}
-            currentTime={state.currentTime}
             duration={state.duration}
             marker={state.startMarkerSeconds}
             masterVolume={state.masterVolume}
             onToggle={() => void audio.togglePlayback()}
             onReturnToMarker={() => void audio.seek(state.startMarkerSeconds)}
             onPlayFromMarker={() => void audio.playFromMarker()}
-            onSetMarker={() => state.setStartMarker(state.currentTime)}
+            onSetMarker={() => state.setStartMarker(useProjectStore.getState().currentTime)}
             onMasterVolumeChange={state.setMasterVolume}
           />
         </main>

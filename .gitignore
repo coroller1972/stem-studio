@@ -14,4 +14,4 @@ coverage/
 *.tsbuildinfo
 stem-studio-ffmpeg/
 bass.wav
-AUDIT.node_modules
+AUDIT.md

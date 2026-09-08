@@ -10,6 +10,7 @@ export interface SeparationService {
     inputPath: string,
     quality: SeparationQuality,
     onEvent: (event: SeparationEvent) => void,
+    signal?: AbortSignal,
   ): Promise<SeparationResult>;
   cancel(): Promise<void>;
 }
@@ -28,6 +29,7 @@ export class TauriSeparationService implements SeparationService {
     inputPath: string,
     quality: SeparationQuality,
     onEvent: (event: SeparationEvent) => void,
+    signal?: AbortSignal,
   ): Promise<SeparationResult> {
     let unlisten: UnlistenFn | undefined;
     try {
@@ -35,6 +37,7 @@ export class TauriSeparationService implements SeparationService {
         const parsed = coerceEvent(payload);
         if (parsed) onEvent(parsed);
       });
+      signal?.throwIfAborted();
       return await invoke<SeparationResult>("separate_audio", { inputPath, quality });
     } finally {
       unlisten?.();

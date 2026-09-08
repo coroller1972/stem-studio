@@ -2,9 +2,10 @@ import { Flag, Pause, Play, RotateCcw, SkipBack, Volume1, Volume2, VolumeX } fro
 import type { TransportStatus } from "../domain/types";
 import { formatTime } from "../domain/transport";
 
+import { useProjectStore } from "../state/projectStore";
+
 interface TransportProps {
   status: TransportStatus;
-  currentTime: number;
   duration: number;
   marker: number;
   masterVolume: number;
@@ -17,7 +18,6 @@ interface TransportProps {
 
 export function Transport({
   status,
-  currentTime,
   duration,
   marker,
   masterVolume,
@@ -50,11 +50,7 @@ export function Transport({
           <span className="sr-only">{isPlaying ? "Pause" : "Play"}</span>
         </button>
       </div>
-      <div className="transport-clock" aria-live="off">
-        <strong>{formatTime(currentTime)}</strong>
-        <span>/</span>
-        <span>{formatTime(duration)}</span>
-      </div>
+      <TransportClock duration={duration} />
       <button className="marker-readout" type="button" onClick={onSetMarker} title="Set marker to playhead">
         <Flag size={13} />
         <span>START</span>
@@ -77,4 +73,9 @@ export function Transport({
       </label>
     </footer>
   );
+}
+
+function TransportClock({ duration }: { duration: number }) {
+  const time = useProjectStore((state) => formatTime(state.currentTime));
+  return <div className="transport-clock" aria-live="off"><strong>{time}</strong><span>/</span><span>{formatTime(duration)}</span></div>;
 }

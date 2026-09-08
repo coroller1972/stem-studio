@@ -42,13 +42,20 @@ export function useAudioEngine() {
     [],
   );
 
-  const load = useCallback(async (stems: StemPaths) => {
+  const load = useCallback(async (stems: StemPaths, signal?: AbortSignal) => {
     const engine = engineRef.current!;
+    signal?.throwIfAborted();
     const waveforms = await engine.load(stems);
+    signal?.throwIfAborted();
     const state = useProjectStore.getState();
     engine.setTrackStates(state.tracks);
     engine.setMasterVolume(state.masterVolume);
     useProjectStore.getState().setReady(engine.duration, waveforms);
+  }, []);
+
+  const clear = useCallback(() => {
+    engineRef.current!.clear();
+    useProjectStore.getState().setTransportStatus("stopped");
   }, []);
 
   const togglePlayback = useCallback(async () => {
@@ -61,14 +68,16 @@ export function useAudioEngine() {
     }
     const from = state.transportStatus === "stopped" ? state.startMarkerSeconds : state.currentTime;
     await engine.play(from);
-    state.setCurrentTime(from);
+    if (!engine.isPlaying) return;
+    state.setCurrentTime(engine.currentTime);
     state.setTransportStatus("playing");
   }, []);
 
   const playFromMarker = useCallback(async () => {
     const state = useProjectStore.getState();
     await engineRef.current!.play(state.startMarkerSeconds);
-    state.setCurrentTime(state.startMarkerSeconds);
+    if (!engineRef.current!.isPlaying) return;
+    state.setCurrentTime(engineRef.current!.currentTime);
     state.setTransportStatus("playing");
   }, []);
 
@@ -86,7 +95,7 @@ export function useAudioEngine() {
   }, []);
 
   return useMemo(
-    () => ({ load, togglePlayback, playFromMarker, seek, getSpectrogram }),
-    [load, togglePlayback, playFromMarker, seek, getSpectrogram],
+    () => ({ load, clear, togglePlayback, playFromMarker, seek, getSpectrogram }),
+    [load, clear, togglePlayback, playFromMarker, seek, getSpectrogram],
   );
 }

@@ -20,9 +20,10 @@ import {
   type SpectrogramData,
 } from "../domain/types";
 
+import { useProjectStore } from "../state/projectStore";
+
 interface FrequencyViewProps {
   duration: number;
-  currentTime: number;
   followPlayback: boolean;
   selectedStem: SpectralStemName;
   onStemChange: (stem: SpectralStemName) => void;
@@ -32,13 +33,13 @@ interface FrequencyViewProps {
 
 export function FrequencyView({
   duration,
-  currentTime,
   followPlayback,
   selectedStem,
   onStemChange,
   onSeek,
   loadSpectrogram,
 }: FrequencyViewProps) {
+  const currentTime = useProjectStore((state) => state.currentTime);
   const [results, setResults] = useState<Partial<Record<SpectralStemName, SpectrogramData>>>({});
   const [loadingStem, setLoadingStem] = useState<SpectralStemName | null>(null);
   const [error, setError] = useState<string | null>(null);

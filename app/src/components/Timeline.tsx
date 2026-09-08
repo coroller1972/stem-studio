@@ -4,9 +4,10 @@ import { STEM_NAMES, type ProjectTranscriptions, type StemName, type StemState, 
 import { formatTime } from "../domain/transport";
 import { TrackControls } from "./TrackControls";
 
+import { useProjectStore } from "../state/projectStore";
+
 interface TimelineProps {
   duration: number;
-  currentTime: number;
   startMarkerSeconds: number;
   tracks: Record<StemName, StemState>;
   waveforms: Partial<Record<StemName, Float32Array>>;
@@ -19,7 +20,6 @@ interface TimelineProps {
 
 export function Timeline({
   duration,
-  currentTime,
   startMarkerSeconds,
   tracks,
   waveforms,
@@ -32,7 +32,6 @@ export function Timeline({
   const laneRef = useRef<HTMLDivElement>(null);
   const draggingMarker = useRef(false);
   const ticks = useMemo(() => createTicks(duration), [duration]);
-  const playheadPercent = toPercent(currentTime, duration);
   const markerPercent = toPercent(startMarkerSeconds, duration);
 
   const secondsFromClientX = (clientX: number): number => {
@@ -97,9 +96,7 @@ export function Timeline({
           onPointerDown={handleLanePointerDown}
           title="Click to seek"
         >
-          <div className="playhead" style={{ left: `${playheadPercent}%` }}>
-            <span />
-          </div>
+          <TimelinePlayhead duration={duration} />
           <button
             type="button"
             className="start-marker"
@@ -181,4 +178,9 @@ function formatRulerTime(seconds: number): string {
   const minutes = Math.floor(seconds / 60);
   const remainder = Math.floor(seconds % 60);
   return `${minutes}:${String(remainder).padStart(2, "0")}`;
+}
+
+function TimelinePlayhead({ duration }: { duration: number }) {
+  const currentTime = useProjectStore((state) => state.currentTime);
+  return <div className="playhead" style={{ left: `${toPercent(currentTime, duration)}%` }}><span /></div>;
 }

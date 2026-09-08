@@ -1,8 +1,10 @@
-import { act, createElement } from "react";
+import { act, createElement, Profiler } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BassTranscriptionView, measureAtTime } from "./TranscriptionWorkspace";
 import type { BassTranscription, TempoMap, TrackTranscriptionState } from "../domain/types";
+
+import { useProjectStore } from "../state/projectStore";
 
 const tempoMap: TempoMap = {
   bpm: 120,
@@ -82,6 +84,28 @@ describe("tablature playback following", () => {
     expect(container.querySelector(".tab-measure.is-current")?.getAttribute("data-measure")).toBe("3");
 
     await act(async () => root.unmount());
+  });
+
+  it("does not rerender notation until the active note or measure changes", async () => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    useProjectStore.setState({ duration: 10, currentTime: 0 });
+    const container = document.createElement("div");
+    document.body.append(container);
+    const root = createRoot(container);
+    const commits = vi.fn();
+    const { currentTime: _time, ...props } = viewAt(0, false).props;
+    await act(async () => root.render(createElement(Profiler, { id: "bass", onRender: commits }, createElement(BassTranscriptionView, props))));
+    commits.mockClear();
+    for (let frame = 1; frame <= 60; frame += 1) {
+      await act(async () => useProjectStore.getState().setCurrentTime(frame / 600));
+    }
+    expect(commits).not.toHaveBeenCalled();
+    await act(async () => useProjectStore.getState().setCurrentTime(2.1));
+    expect(commits).toHaveBeenCalled();
+    expect(container.querySelector(".tab-measure.is-current")?.getAttribute("data-measure")).toBe("2");
+    await act(async () => root.unmount());
+    useProjectStore.getState().reset();
+    vi.unstubAllGlobals();
   });
 
   it("keeps progress visible while re-transcribing an existing result", async () => {

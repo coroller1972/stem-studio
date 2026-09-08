@@ -1,6 +1,7 @@
 import type { SpectralStemName, SpectrogramData } from "../domain/types";
 
-const DEFAULT_FFT_SIZE = 8_192;
+export const DEFAULT_FFT_SIZE = 8_192;
+export const SPECTROGRAM_BATCH_COLUMNS = 32;
 const DECIBEL_RANGE = 72;
 const SILENCE_DB = -240;
 
@@ -28,36 +29,55 @@ export function calculateSpectrogram(
   maxMidi: number,
   fftSize = DEFAULT_FFT_SIZE,
 ): SpectrogramData {
-  if (fftSize < 2 || (fftSize & (fftSize - 1)) !== 0) {
-    throw new Error("Spectrogram FFT size must be a power of two.");
+  const accumulator = new SpectrogramAccumulator(sampleRate, width, minMidi, maxMidi, fftSize);
+  const frame = new Float32Array(fftSize);
+  for (let column = 0; column < accumulator.width; column += 1) {
+    const start = spectrogramFrameStart(samples.length, column, accumulator.width, fftSize);
+    for (let index = 0; index < fftSize; index += 1) frame[index] = samples[start + index] ?? 0;
+    accumulator.addFrame(column, frame);
   }
-  const safeWidth = Math.max(1, Math.floor(width));
-  const safeMinMidi = Math.round(Math.min(minMidi, maxMidi));
-  const safeMaxMidi = Math.round(Math.max(minMidi, maxMidi));
-  const height = safeMaxMidi - safeMinMidi + 1;
-  const decibels = new Float32Array(safeWidth * height);
-  const real = new Float32Array(fftSize);
-  const imaginary = new Float32Array(fftSize);
-  let maximumDb = SILENCE_DB;
+  return accumulator.finish();
+}
 
-  for (let column = 0; column < safeWidth; column += 1) {
-    const center = safeWidth === 1
-      ? Math.floor(samples.length / 2)
-      : Math.round((column / (safeWidth - 1)) * Math.max(0, samples.length - 1));
-    const start = center - Math.floor(fftSize / 2);
+export function spectrogramFrameStart(length: number, column: number, width: number, fftSize = DEFAULT_FFT_SIZE): number {
+  const center = width === 1 ? Math.floor(length / 2) : Math.round((column / (width - 1)) * Math.max(0, length - 1));
+  return center - Math.floor(fftSize / 2);
+}
 
+export class SpectrogramAccumulator {
+  readonly width: number;
+  private readonly minMidi: number;
+  private readonly maxMidi: number;
+  private readonly height: number;
+  private readonly decibels: Float32Array;
+  private readonly real: Float32Array;
+  private readonly imaginary: Float32Array;
+  private readonly window: Float32Array;
+  private maximumDb = SILENCE_DB;
+
+  constructor(private readonly sampleRate: number, width: number, minMidi: number, maxMidi: number, private readonly fftSize = DEFAULT_FFT_SIZE) {
+    if (fftSize < 2 || (fftSize & (fftSize - 1)) !== 0) throw new Error("Spectrogram FFT size must be a power of two.");
+    this.width = Math.max(1, Math.floor(width));
+    this.minMidi = Math.round(Math.min(minMidi, maxMidi));
+    this.maxMidi = Math.round(Math.max(minMidi, maxMidi));
+    this.height = this.maxMidi - this.minMidi + 1;
+    this.decibels = new Float32Array(this.width * this.height);
+    this.real = new Float32Array(fftSize);
+    this.imaginary = new Float32Array(fftSize);
+    this.window = Float32Array.from({ length: fftSize }, (_, index) => 0.5 - 0.5 * Math.cos((2 * Math.PI * index) / (fftSize - 1)));
+  }
+
+  addFrame(column: number, samples: Float32Array): void {
+    const { real, imaginary, fftSize } = this;
     for (let index = 0; index < fftSize; index += 1) {
-      const sampleIndex = start + index;
-      const window = 0.5 - 0.5 * Math.cos((2 * Math.PI * index) / Math.max(1, fftSize - 1));
-      real[index] = (samples[sampleIndex] ?? 0) * window;
+      real[index] = (samples[index] ?? 0) * this.window[index]!;
       imaginary[index] = 0;
     }
-
     fft(real, imaginary);
 
-    for (let row = 0; row < height; row += 1) {
-      const midi = safeMaxMidi - row;
-      const bin = (midiFrequency(midi) * fftSize) / sampleRate;
+    for (let row = 0; row < this.height; row += 1) {
+      const midi = this.maxMidi - row;
+      const bin = (midiFrequency(midi) * fftSize) / this.sampleRate;
       const lowerBin = Math.max(1, Math.floor(bin / 2 ** (1 / 24)));
       const upperBin = Math.min(fftSize / 2 - 1, Math.ceil(bin * 2 ** (1 / 24)));
       let energy = 0;
@@ -70,27 +90,29 @@ export function calculateSpectrogram(
 
       const magnitude = count > 0 ? Math.sqrt(energy / count) / fftSize : 0;
       const db = magnitude > 0 ? 20 * Math.log10(magnitude) : SILENCE_DB;
-      decibels[column * height + row] = db;
-      maximumDb = Math.max(maximumDb, db);
+      this.decibels[column * this.height + row] = db;
+      this.maximumDb = Math.max(this.maximumDb, db);
     }
   }
 
-  const values = new Uint8Array(decibels.length);
-  if (maximumDb > SILENCE_DB) {
-    const floorDb = maximumDb - DECIBEL_RANGE;
-    for (let index = 0; index < decibels.length; index += 1) {
-      const normalized = Math.min(1, Math.max(0, (decibels[index]! - floorDb) / DECIBEL_RANGE));
-      values[index] = Math.round(255 * normalized ** 0.72);
+  finish(): SpectrogramData {
+    const values = new Uint8Array(this.decibels.length);
+    if (this.maximumDb > SILENCE_DB) {
+      const floorDb = this.maximumDb - DECIBEL_RANGE;
+      for (let index = 0; index < this.decibels.length; index += 1) {
+        const normalized = Math.min(1, Math.max(0, (this.decibels[index]! - floorDb) / DECIBEL_RANGE));
+        values[index] = Math.round(255 * normalized ** 0.72);
+      }
     }
-  }
 
-  return {
-    width: safeWidth,
-    height,
-    minMidi: safeMinMidi,
-    maxMidi: safeMaxMidi,
-    values,
-  };
+    return {
+      width: this.width,
+      height: this.height,
+      minMidi: this.minMidi,
+      maxMidi: this.maxMidi,
+      values,
+    };
+  }
 }
 
 function fft(real: Float32Array, imaginary: Float32Array): void {

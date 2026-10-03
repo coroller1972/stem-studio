@@ -2,6 +2,9 @@
   "bundle": {
     "externalBin": ["binaries/ffmpeg"],
     "resources": ["binaries/stem-engine"],
-    "targets": ["app", "dmg"]
+    "targets": ["app", "dmg"],
+    "macOS": {
+      "signingIdentity": "-"
+    }
   }
 }

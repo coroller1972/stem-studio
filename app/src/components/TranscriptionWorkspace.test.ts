@@ -126,7 +126,10 @@ describe("tablature playback following", () => {
     expect(progress?.getAttribute("aria-valuenow")).toBe("42");
     expect(progress?.querySelector<HTMLElement>("span")?.style.width).toBe("42%");
     expect(container.textContent).toContain("Transcribing bass notes · 42%");
-    expect(container.querySelector<HTMLButtonElement>(".transcription-actions .ghost-button")?.disabled).toBe(true);
+    const actions = [...container.querySelectorAll<HTMLButtonElement>(".transcription-actions button")];
+    expect(actions.find((action) => action.textContent?.includes("Re-transcribe"))).toBeUndefined();
+    expect(actions.find((action) => action.textContent?.includes("Cancel"))?.disabled).toBe(false);
+    expect(actions.find((action) => action.textContent?.includes("MIDI"))?.disabled).toBe(true);
 
     await act(async () => root.unmount());
   });
@@ -148,6 +151,7 @@ describe("manual transcription timing", () => {
       onTuningChange: vi.fn(),
       onEngineChange: vi.fn(),
       onTranscribe: vi.fn(),
+      onCancel: vi.fn(),
       startMarkerSeconds: 1.25,
       onRequantize,
       onSeek: vi.fn(),
@@ -176,6 +180,7 @@ function viewAt(
     onTuningChange: vi.fn(),
     onEngineChange: vi.fn(),
     onTranscribe: vi.fn(),
+    onCancel: vi.fn(),
     startMarkerSeconds: 1.25,
     onRequantize: vi.fn(),
     onSeek: vi.fn(),

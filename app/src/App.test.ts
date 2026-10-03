@@ -8,6 +8,7 @@ import { useProjectStore } from "./state/projectStore";
 import { AudioEngine } from "./audio/AudioEngine";
 import { TauriSeparationService } from "./services/separationService";
 import { TauriSessionService } from "./services/sessionService";
+import { TauriTranscriptionService } from "./services/transcriptionService";
 import type { SeparationResult, StemName } from "./domain/types";
 
 vi.mock("./components/Header", async (original) => {
@@ -136,5 +137,57 @@ describe("project import lifecycle", () => {
     await act(async () => root.unmount());
     await act(async () => subscription.resolve(cleanup));
     expect(cleanup).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("transcription coordination", () => {
+  beforeEach(() => {
+    vi.stubGlobal("__TAURI_INTERNALS__", {});
+    const store = useProjectStore.getState();
+    store.beginImport("/song.mp3");
+    store.setSeparated(result.projectPath, result.stems, "standard");
+    store.setReady(120, waveforms);
+  });
+
+  async function startDrumTranscription() {
+    let rejectTranscription!: (error: Error) => void;
+    const pending = new Promise<never>((_, reject) => { rejectTranscription = reject; });
+    const transcribe = vi.spyOn(TauriTranscriptionService.prototype, "transcribe").mockReturnValue(pending);
+    await act(async () => root.render(createElement(App)));
+    await act(async () => button(".track-transcribe-button").click());
+    expect(transcribe).toHaveBeenCalledWith("/test", "drums", expect.any(Function));
+    expect(useProjectStore.getState().transcriptions.drums.status).toBe("processing");
+    return { rejectTranscription };
+  }
+
+  it("keeps the open project when an import is attempted during a transcription", async () => {
+    const separate = vi.spyOn(TauriSeparationService.prototype, "separate");
+    const choose = vi.spyOn(TauriSeparationService.prototype, "chooseFile").mockResolvedValue("/next.wav");
+    await startDrumTranscription();
+
+    expect(button(".import-button").disabled).toBe(true);
+    await act(async () => {
+      webview.subscribe.mock.calls.at(-1)![0]({ payload: { type: "drop", paths: ["/next.wav"] } });
+    });
+
+    expect(choose).not.toHaveBeenCalled();
+    expect(separate).not.toHaveBeenCalled();
+    expect(useProjectStore.getState().status).toBe("ready");
+    expect(useProjectStore.getState().source?.name).toBe("song.mp3");
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain("Wait for the transcription");
+  });
+
+  it("cancels a running transcription and returns the view to its previous state", async () => {
+    const cancel = vi.spyOn(TauriTranscriptionService.prototype, "cancel").mockResolvedValue();
+    const { rejectTranscription } = await startDrumTranscription();
+
+    await act(async () => button(".transcription-cancel").click());
+    expect(cancel).toHaveBeenCalledTimes(1);
+    await act(async () => rejectTranscription(new Error("Transcription was cancelled.")));
+
+    const drums = useProjectStore.getState().transcriptions.drums;
+    expect(drums.status).toBe("idle");
+    expect(drums.error).toBeNull();
+    expect(button(".import-button").disabled).toBe(false);
   });
 });

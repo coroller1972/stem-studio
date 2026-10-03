@@ -22,6 +22,7 @@ from transcription_domain import (
     TranscriptionProgressReporter,
     TranscriptionTrack,
 )
+from transcription_outputs import write_transcription_outputs
 
 
 def requantize_transcription(
@@ -68,14 +69,12 @@ def requantize_transcription(
             source_events=source_events,
         )
         progress.report(track, "export", 0.75, "Regenerating bass exports")
-        json_path = _write_json(output / "bass.json", transcription.to_payload())
-        midi_path = export_bass_midi(quantized, tempo_map, output / "bass.mid")
-        xml_path = export_bass_musicxml(
-            quantized,
-            tab,
-            tempo_map,
-            output / "bass.musicxml",
-            tuning=tuning,
+        json_path, midi_path, xml_path = write_transcription_outputs(
+            output,
+            "bass",
+            transcription.to_payload(),
+            lambda path: export_bass_midi(quantized, tempo_map, path),
+            lambda path: export_bass_musicxml(quantized, tab, tempo_map, path, tuning=tuning),
         )
     else:
         source_events = _drum_events(payload.get("sourceEvents") or payload.get("events"))
@@ -96,9 +95,13 @@ def requantize_transcription(
             source_events=source_events,
         )
         progress.report(track, "export", 0.75, "Regenerating drum exports")
-        json_path = _write_json(output / "drums.json", transcription.to_payload())
-        midi_path = export_drums_midi(quantized, tempo_map, output / "drums.mid")
-        xml_path = export_drums_musicxml(quantized, tempo_map, output / "drums.musicxml")
+        json_path, midi_path, xml_path = write_transcription_outputs(
+            output,
+            "drums",
+            transcription.to_payload(),
+            lambda path: export_drums_midi(quantized, tempo_map, path),
+            lambda path: export_drums_musicxml(quantized, tempo_map, path),
+        )
 
     progress.report(track, "completed", 1.0, "Timing update completed")
     return TranscriptionFiles(json_path, midi_path, xml_path, transcription)
@@ -194,10 +197,3 @@ def _tempo_candidates(payload: dict[str, Any]) -> tuple[float, ...]:
 
 def _optional_float(value: object) -> float | None:
     return None if value is None else float(value)
-
-
-def _write_json(path: Path, payload: dict[str, object]) -> Path:
-    temporary = path.with_suffix(".json.tmp")
-    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    temporary.replace(path)
-    return path

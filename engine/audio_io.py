@@ -121,10 +121,10 @@ class FfmpegAudioIO:
             raise AudioDecodingError("; ".join(errors)) from error
 
     def save_wav(self, audio: Any, path: Path, sample_rate: int) -> None:
+        # Never rescale one file on its own: stems must keep their relative levels
+        # so that mixing them at unity gain reconstructs the source. Float WAV keeps
+        # peaks above 1.0 intact; only the PCM16 fallback has to clip them.
         tensor = audio.detach().cpu().float()
-        peak = tensor.abs().max().item()
-        if peak > 0.99:
-            tensor = tensor * (0.99 / peak)
         channels_last = tensor.transpose(0, 1).contiguous().numpy()
         channels = channels_last.shape[1]
 

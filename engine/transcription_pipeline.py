@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import math
 import time
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
@@ -17,6 +16,7 @@ from fretboard import BassFretboardSolver
 from midi_export import export_bass_midi, export_drums_midi
 from musicxml_export import export_bass_musicxml, export_drums_musicxml
 from quantization import quantize_drums, quantize_notes
+from transcription_outputs import write_transcription_outputs
 from transcription_domain import (
     BassTranscriber,
     BassTranscription,
@@ -112,14 +112,12 @@ class TranscriptionEngine:
             normalized_events,
         )
         progress.report("bass", "export", 0.86, "Writing MIDI and MusicXML")
-        json_path = _write_json(output / "bass.json", transcription.to_payload())
-        midi_path = export_bass_midi(quantized, tempo_map, output / "bass.mid")
-        xml_path = export_bass_musicxml(
-            quantized,
-            tab,
-            tempo_map,
-            output / "bass.musicxml",
-            tuning=tuning,
+        json_path, midi_path, xml_path = write_transcription_outputs(
+            output,
+            "bass",
+            transcription.to_payload(),
+            lambda path: export_bass_midi(quantized, tempo_map, path),
+            lambda path: export_bass_musicxml(quantized, tab, tempo_map, path, tuning=tuning),
         )
         progress.report("bass", "completed", 1, "Bass transcription completed")
         return TranscriptionFiles(json_path, midi_path, xml_path, transcription)
@@ -167,9 +165,13 @@ class TranscriptionEngine:
             events,
         )
         progress.report("drums", "export", 0.86, "Writing MIDI and MusicXML")
-        json_path = _write_json(output / "drums.json", transcription.to_payload())
-        midi_path = export_drums_midi(quantized, tempo_map, output / "drums.mid")
-        xml_path = export_drums_musicxml(quantized, tempo_map, output / "drums.musicxml")
+        json_path, midi_path, xml_path = write_transcription_outputs(
+            output,
+            "drums",
+            transcription.to_payload(),
+            lambda path: export_drums_midi(quantized, tempo_map, path),
+            lambda path: export_drums_musicxml(quantized, tempo_map, path),
+        )
         progress.report("drums", "completed", 1, "Drum transcription completed")
         return TranscriptionFiles(json_path, midi_path, xml_path, transcription)
 
@@ -213,10 +215,3 @@ def _run_stage(
                 elapsed = time.monotonic() - started_at
                 fraction = 1 - math.exp(-elapsed / 50)
                 reporter.report(track, stage, min(end, start + (end - start) * fraction), message)
-
-
-def _write_json(path: Path, payload: dict[str, object]) -> Path:
-    temporary = path.with_suffix(".json.tmp")
-    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    temporary.replace(path)
-    return path

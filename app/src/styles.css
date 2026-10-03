@@ -1239,6 +1239,11 @@ input:focus-visible {
   text-align: right;
 }
 
+.transcription-progress .transcription-cancel {
+  grid-column: 1 / -1;
+  justify-self: center;
+}
+
 .transcription-error {
   color: #f19a9a !important;
 }

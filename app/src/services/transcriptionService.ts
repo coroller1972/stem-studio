@@ -58,6 +58,11 @@ export class TauriTranscriptionService {
     }
   }
 
+  /** Stops the running transcription; the engine runner is shared with separation. */
+  async cancel(): Promise<void> {
+    await invoke("cancel_separation");
+  }
+
   async exportFile(
     sourcePath: string,
     suggestedName: string,

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { EmptyState } from "./components/EmptyState";
@@ -22,6 +22,7 @@ import type {
   BassTuning,
   DrumInstrument,
   DrumTranscription,
+  ProjectTranscriptions,
   SeparationQuality,
   SpectralStemName,
   SpectrogramData,
@@ -37,6 +38,7 @@ import { useProjectStore } from "./state/projectStore";
 import { ProjectOperations } from "./services/projectOperations";
 
 const AUDIO_EXTENSION = /\.(mp3|wav)$/i;
+const TRANSCRIPTION_BUSY_MESSAGE = "Wait for the transcription to finish, or cancel it, first.";
 
 export default function App() {
   const service = useMemo(() => new TauriSeparationService(), []);
@@ -75,6 +77,7 @@ export default function App() {
     setBassTranscription: store.setBassTranscription,
     setDrumTranscription: store.setDrumTranscription,
     setTranscriptionError: store.setTranscriptionError,
+    setTranscriptionCancelled: store.setTranscriptionCancelled,
     setTranscriptionProgress: store.setTranscriptionProgress,
   })));
   const {
@@ -93,8 +96,11 @@ export default function App() {
     setBassTranscription,
     setDrumTranscription,
     setTranscriptionError,
+    setTranscriptionCancelled,
     setTranscriptionProgress,
   } = state;
+  const transcribing = isTranscribing(state.transcriptions);
+  const transcriptionCancelRequested = useRef(false);
   const [isDragging, setIsDragging] = useState(false);
   const [quality, setQuality] = useState<SeparationQuality>("standard");
   const [sessionFeedback, setSessionFeedback] = useState<SessionFeedback | null>(null);
@@ -134,6 +140,11 @@ export default function App() {
   );
 
   const runImport = useCallback(async (path?: string) => {
+    // Importing replaces the open project, and the engine runner is still busy.
+    if (isTranscribing(useProjectStore.getState().transcriptions)) {
+      setSessionFeedback({ kind: "error", message: TRANSCRIPTION_BUSY_MESSAGE });
+      return;
+    }
     const signal = operations.begin();
     if (!signal) return;
     setProjectBusy(true);
@@ -161,6 +172,11 @@ export default function App() {
     }
     const snapshot = useProjectStore.getState();
     if (snapshot.status !== "ready" || !snapshot.projectPath || !snapshot.source) return;
+    // A running transcription rewrites the files this save would copy.
+    if (isTranscribing(snapshot.transcriptions)) {
+      setSessionFeedback({ kind: "error", message: TRANSCRIPTION_BUSY_MESSAGE });
+      return;
+    }
     const signal = operations.begin();
     if (!signal) return;
     setProjectBusy(true);
@@ -195,6 +211,10 @@ export default function App() {
   const openSession = useCallback(async () => {
     if (!isTauriRuntime()) {
       setSessionFeedback({ kind: "error", message: "Sessions are available in the Tauri desktop app." });
+      return;
+    }
+    if (isTranscribing(useProjectStore.getState().transcriptions)) {
+      setSessionFeedback({ kind: "error", message: TRANSCRIPTION_BUSY_MESSAGE });
       return;
     }
     const signal = operations.begin();
@@ -246,8 +266,13 @@ export default function App() {
     async (track: TranscriptionTrack) => {
       const snapshot = useProjectStore.getState();
       if (snapshot.status !== "ready" || !snapshot.projectPath) return;
+      if (operations.busy || isTranscribing(snapshot.transcriptions)) {
+        setSessionFeedback({ kind: "error", message: TRANSCRIPTION_BUSY_MESSAGE });
+        return;
+      }
       const version = operations.version;
       const isCurrent = () => operations.version === version;
+      transcriptionCancelRequested.current = false;
       beginTranscription(track);
       setActiveTab(track);
       const onEvent = (event: import("./domain/types").TranscriptionEvent) => {
@@ -271,6 +296,10 @@ export default function App() {
         }
       } catch (error) {
         if (!isCurrent()) return;
+        if (transcriptionCancelRequested.current) {
+          setTranscriptionCancelled(track);
+          return;
+        }
         const message = error instanceof Error ? error.message : String(error);
         setTranscriptionError(track, message || `${track} transcription failed.`);
       }
@@ -282,6 +311,7 @@ export default function App() {
       bassTuning,
       setBassTranscription,
       setDrumTranscription,
+      setTranscriptionCancelled,
       setTranscriptionError,
       setTranscriptionProgress,
       transcriptionService,
@@ -292,8 +322,13 @@ export default function App() {
     async (track: TranscriptionTrack, bpm: number, firstMeasureSeconds: number) => {
       const snapshot = useProjectStore.getState();
       if (snapshot.status !== "ready" || !snapshot.projectPath) return;
+      if (operations.busy || isTranscribing(snapshot.transcriptions)) {
+        setSessionFeedback({ kind: "error", message: TRANSCRIPTION_BUSY_MESSAGE });
+        return;
+      }
       const version = operations.version;
       const isCurrent = () => operations.version === version;
+      transcriptionCancelRequested.current = false;
       beginTranscription(track);
       const onEvent = (event: import("./domain/types").TranscriptionEvent) => {
         if (isCurrent() && event.type === "transcription_progress" && event.track === track) {
@@ -322,6 +357,10 @@ export default function App() {
         }
       } catch (error) {
         if (!isCurrent()) return;
+        if (transcriptionCancelRequested.current) {
+          setTranscriptionCancelled(track);
+          return;
+        }
         const message = error instanceof Error ? error.message : String(error);
         setTranscriptionError(track, message || `Unable to update ${track} timing.`);
       }
@@ -331,11 +370,22 @@ export default function App() {
       operations,
       setBassTranscription,
       setDrumTranscription,
+      setTranscriptionCancelled,
       setTranscriptionError,
       setTranscriptionProgress,
       transcriptionService,
     ],
   );
+
+  const cancelTranscription = useCallback(async () => {
+    if (!isTranscribing(useProjectStore.getState().transcriptions)) return;
+    transcriptionCancelRequested.current = true;
+    try {
+      await transcriptionService.cancel();
+    } catch {
+      // The engine already stopped; its own completion or error is reported normally.
+    }
+  }, [transcriptionService]);
 
   const exportTranscription = useCallback(
     async (path: string, name: string, extension: "mid" | "musicxml") => {
@@ -446,7 +496,7 @@ export default function App() {
       <Header
         fileName={state.source?.name ?? null}
         quality={quality}
-        disabled={projectBusy || state.status === "separating" || state.status === "loading"}
+        disabled={projectBusy || transcribing || state.status === "separating" || state.status === "loading"}
         canSaveSession={state.status === "ready"}
         onImport={() => void chooseFile()}
         onOpenSession={() => void openSession()}
@@ -509,6 +559,7 @@ export default function App() {
                 engine={bassEngine}
                 onEngineChange={setBassEngine}
                 onTranscribe={() => void transcribe("bass")}
+                onCancel={() => void cancelTranscription()}
                 startMarkerSeconds={state.startMarkerSeconds}
                 onRequantize={(bpm, firstMeasureSeconds) =>
                   void requantize("bass", bpm, firstMeasureSeconds)
@@ -521,6 +572,7 @@ export default function App() {
                 state={state.transcriptions.drums}
                 followPlayback={state.transportStatus === "playing"}
                 onTranscribe={() => void transcribe("drums")}
+                onCancel={() => void cancelTranscription()}
                 startMarkerSeconds={state.startMarkerSeconds}
                 onRequantize={(bpm, firstMeasureSeconds) =>
                   void requantize("drums", bpm, firstMeasureSeconds)
@@ -570,9 +622,14 @@ function isTypingTarget(target: EventTarget | null): boolean {
   );
 }
 
+function isTranscribing(transcriptions: ProjectTranscriptions): boolean {
+  return transcriptions.bass.status === "processing" || transcriptions.drums.status === "processing";
+}
+
 function toUserMessage(message: string): string {
   const lower = message.toLowerCase();
   if (lower.includes("cancel")) return "Stem separation was cancelled.";
+  if (lower.includes("already running")) return "Another audio operation is still running. Wait for it to finish.";
   if (lower.includes("high-quality engine") || lower.includes("python 3.10")) {
     return "High quality requires Python 3.10+ and the latest engine dependencies.";
   }

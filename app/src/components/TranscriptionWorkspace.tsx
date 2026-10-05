@@ -1,4 +1,4 @@
-import { Download, Music2, RefreshCw, WandSparkles } from "lucide-react";
+import { Download, Music2, RefreshCw, WandSparkles, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type {
   BassTranscription,
@@ -51,6 +51,7 @@ interface BassViewProps {
   engine: BassTranscriptionEngine;
   onEngineChange: (engine: BassTranscriptionEngine) => void;
   onTranscribe: () => void;
+  onCancel: () => void;
   startMarkerSeconds: number;
   onRequantize: (bpm: number, firstMeasureSeconds: number) => void;
   onSeek: (seconds: number) => void;
@@ -66,6 +67,7 @@ export function BassTranscriptionView({
   engine,
   onEngineChange,
   onTranscribe,
+  onCancel,
   startMarkerSeconds,
   onRequantize,
   onSeek,
@@ -94,6 +96,7 @@ export function BassTranscriptionView({
           />
         }
         onTranscribe={onTranscribe}
+        onCancel={onCancel}
       />
     );
   }
@@ -117,6 +120,7 @@ export function BassTranscriptionView({
           />
         }
         onRetranscribe={onTranscribe}
+        onCancel={onCancel}
         onMidi={() => onExport(midiFile, "bass.mid", "mid")}
         onMusicXml={() => onExport(musicXmlFile, "bass.musicxml", "musicxml")}
       />
@@ -143,6 +147,7 @@ interface DrumViewProps {
   currentTime?: number;
   followPlayback: boolean;
   onTranscribe: () => void;
+  onCancel: () => void;
   startMarkerSeconds: number;
   onRequantize: (bpm: number, firstMeasureSeconds: number) => void;
   onSeek: (seconds: number) => void;
@@ -154,6 +159,7 @@ export function DrumTranscriptionView({
   currentTime,
   followPlayback,
   onTranscribe,
+  onCancel,
   startMarkerSeconds,
   onRequantize,
   onSeek,
@@ -168,7 +174,7 @@ export function DrumTranscriptionView({
     ] as const;
   }));
   if (!state.result) {
-    return <EmptyTranscription track="drums" state={state} onTranscribe={onTranscribe} />;
+    return <EmptyTranscription track="drums" state={state} onTranscribe={onTranscribe} onCancel={onCancel} />;
   }
   const { transcription, midiFile, musicXmlFile } = state.result;
   return (
@@ -181,6 +187,7 @@ export function DrumTranscriptionView({
           message: state.message,
         } : undefined}
         onRetranscribe={onTranscribe}
+        onCancel={onCancel}
         onMidi={() => onExport(midiFile, "drums.mid", "mid")}
         onMusicXml={() => onExport(musicXmlFile, "drums.musicxml", "musicxml")}
       />
@@ -207,11 +214,13 @@ function EmptyTranscription({
   state,
   controls,
   onTranscribe,
+  onCancel,
 }: {
   track: TranscriptionTrack;
   state: TrackTranscriptionState<BassTranscription> | TrackTranscriptionState<DrumTranscription>;
   controls?: ReactNode;
   onTranscribe: () => void;
+  onCancel: () => void;
 }) {
   const label = track === "bass" ? "bass line" : "drum part";
   return (
@@ -225,6 +234,7 @@ function EmptyTranscription({
           <div><span style={{ width: `${state.progress * 100}%` }} /></div>
           <strong>{state.message}</strong>
           <small>{Math.round(state.progress * 100)}%</small>
+          <button type="button" className="ghost-button transcription-cancel" onClick={onCancel}><X size={14} /> Cancel</button>
         </div>
       ) : (
         <button className="primary-button transcribe-primary" type="button" onClick={onTranscribe}>
@@ -242,6 +252,7 @@ function TranscriptionHeader({
   controls,
   processing,
   onRetranscribe,
+  onCancel,
   onMidi,
   onMusicXml,
 }: {
@@ -250,6 +261,7 @@ function TranscriptionHeader({
   controls?: ReactNode;
   processing?: { progress: number; message: string } | undefined;
   onRetranscribe: () => void;
+  onCancel: () => void;
   onMidi: () => void;
   onMusicXml: () => void;
 }) {
@@ -261,7 +273,11 @@ function TranscriptionHeader({
       </div>
       <div className="transcription-actions">
         {controls}
-        <button type="button" className="ghost-button" disabled={Boolean(processing)} onClick={onRetranscribe}><RefreshCw size={14} /> Re-transcribe</button>
+        {processing ? (
+          <button type="button" className="ghost-button transcription-cancel" onClick={onCancel}><X size={14} /> Cancel</button>
+        ) : (
+          <button type="button" className="ghost-button" onClick={onRetranscribe}><RefreshCw size={14} /> Re-transcribe</button>
+        )}
         <button type="button" className="ghost-button" disabled={Boolean(processing)} onClick={onMidi}><Download size={14} /> MIDI</button>
         <button type="button" className="primary-button" disabled={Boolean(processing)} onClick={onMusicXml}><Download size={14} /> MusicXML</button>
       </div>

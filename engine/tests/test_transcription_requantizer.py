@@ -4,6 +4,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from transcription_domain import TranscriptionProgressReporter
 from transcription_requantizer import requantize_transcription
@@ -109,6 +110,57 @@ class TranscriptionRequantizerTests(unittest.TestCase):
 
             self.assertEqual(result.transcription.events[0].quantized_beat, 0.75)
             self.assertEqual(result.transcription.to_payload()["schemaVersion"], 2)
+
+    def test_failed_export_keeps_the_previous_files_consistent(self) -> None:
+        payload = {
+            "schemaVersion": 1,
+            "track": "drums",
+            "events": [
+                {
+                    "id": "kick",
+                    "detectedTimeSeconds": 0.52,
+                    "quantizedBeat": 1,
+                    "instrument": "kick",
+                    "velocity": 110,
+                    "confidence": None,
+                }
+            ],
+            "tempoMap": {
+                "bpm": 120,
+                "beats": [],
+                "timeSignature": {"numerator": 4, "denominator": 4},
+            },
+            "warnings": [],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "drums.json"
+            original_json = json.dumps(payload)
+            source.write_text(original_json, encoding="utf-8")
+            (root / "drums.mid").write_bytes(b"previous midi")
+            (root / "drums.musicxml").write_text("<previous/>", encoding="utf-8")
+
+            with mock.patch(
+                "transcription_requantizer.export_drums_musicxml",
+                side_effect=ValueError("measure overflow"),
+            ):
+                with self.assertRaises(ValueError):
+                    requantize_transcription(
+                        source,
+                        root,
+                        "drums",
+                        100,
+                        0.1,
+                        TranscriptionProgressReporter(lambda _update: None),
+                    )
+
+            self.assertEqual(source.read_text(encoding="utf-8"), original_json)
+            self.assertEqual((root / "drums.mid").read_bytes(), b"previous midi")
+            self.assertEqual((root / "drums.musicxml").read_text(encoding="utf-8"), "<previous/>")
+            self.assertEqual(
+                sorted(path.name for path in root.iterdir()),
+                ["drums.json", "drums.mid", "drums.musicxml"],
+            )
 
 
 if __name__ == "__main__":

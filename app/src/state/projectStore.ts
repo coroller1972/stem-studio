@@ -70,6 +70,7 @@ interface ProjectState {
   setBassTranscription: (result: TranscriptionFiles<BassTranscription>) => void;
   setDrumTranscription: (result: TranscriptionFiles<DrumTranscription>) => void;
   setTranscriptionError: (track: TranscriptionTrack, message: string) => void;
+  setTranscriptionCancelled: (track: TranscriptionTrack) => void;
 }
 
 const initialState = {
@@ -220,6 +221,18 @@ export const useProjectStore = create<ProjectState>((set) => ({
         },
       },
     })),
+  setTranscriptionCancelled: (track) =>
+    set((state) => {
+      const current = state.transcriptions[track];
+      return {
+        transcriptions: {
+          ...state.transcriptions,
+          [track]: current.result
+            ? { ...current, status: "ready", stage: "completed", progress: 1, message: "Transcription cancelled", error: null }
+            : { ...current, status: "idle", stage: null, progress: 0, message: "", error: null },
+        },
+      };
+    }),
 }));
 
 function createDefaultTranscriptions(): ProjectTranscriptions {

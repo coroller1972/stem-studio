@@ -22,6 +22,28 @@ struct RunnerState {
     cancel_sender: Mutex<Option<watch::Sender<bool>>>,
 }
 
+impl RunnerState {
+    /// Runs one engine operation at a time and always releases the slot, whatever
+    /// way the operation finishes, so a failed setup step cannot block later work.
+    async fn run_exclusive<T, F, Fut>(&self, busy_message: &str, operation: F) -> Result<T, String>
+    where
+        F: FnOnce(watch::Receiver<bool>) -> Fut,
+        Fut: std::future::Future<Output = Result<T, String>>,
+    {
+        let mut active = self.cancel_sender.lock().await;
+        if active.is_some() {
+            return Err(busy_message.into());
+        }
+        let (cancel_sender, cancel_receiver) = watch::channel(false);
+        *active = Some(cancel_sender);
+        drop(active);
+
+        let result = operation(cancel_receiver).await;
+        *self.cancel_sender.lock().await = None;
+        result
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct StemPaths {
     vocals: String,
@@ -403,49 +425,46 @@ async fn separate_audio(
     quality: Option<SeparationQuality>,
 ) -> Result<SeparationResult, String> {
     validate_input(&input_path)?;
-
-    let mut active = state.cancel_sender.lock().await;
-    if active.is_some() {
-        return Err("A separation is already running.".into());
-    }
-    let (cancel_sender, mut cancel_receiver) = watch::channel(false);
-    *active = Some(cancel_sender);
-    drop(active);
-
-    let project_id = Uuid::new_v4().to_string();
-    let projects_path = app
-        .path()
-        .app_data_dir()
-        .map_err(|error| error.to_string())?
-        .join("projects");
-    cleanup_project_cache(&projects_path);
-    let project_path = projects_path.join(&project_id);
-    std::fs::create_dir_all(&project_path).map_err(|error| error.to_string())?;
-
     let quality = quality.unwrap_or(SeparationQuality::Standard);
-    let result = run_engine(
-        &app,
-        &input_path,
-        &project_path,
-        quality,
-        &mut cancel_receiver,
-    )
-    .await;
-    *state.cancel_sender.lock().await = None;
 
-    let stems = match result {
-        Ok(stems) => stems,
-        Err(error) => {
-            let _ = fs::remove_dir_all(&project_path);
-            return Err(error);
-        }
-    };
-    Ok(SeparationResult {
-        project_id,
-        project_path: project_path.to_string_lossy().into_owned(),
-        stems,
-        quality_profile: quality,
-    })
+    state
+        .run_exclusive(
+            "An audio operation is already running.",
+            |mut cancel_receiver| async move {
+                let project_id = Uuid::new_v4().to_string();
+                let projects_path = app
+                    .path()
+                    .app_data_dir()
+                    .map_err(|error| error.to_string())?
+                    .join("projects");
+                cleanup_project_cache(&projects_path);
+                let project_path = projects_path.join(&project_id);
+                std::fs::create_dir_all(&project_path).map_err(|error| error.to_string())?;
+
+                let stems = match run_engine(
+                    &app,
+                    &input_path,
+                    &project_path,
+                    quality,
+                    &mut cancel_receiver,
+                )
+                .await
+                {
+                    Ok(stems) => stems,
+                    Err(error) => {
+                        let _ = fs::remove_dir_all(&project_path);
+                        return Err(error);
+                    }
+                };
+                Ok(SeparationResult {
+                    project_id,
+                    project_path: project_path.to_string_lossy().into_owned(),
+                    stems,
+                    quality_profile: quality,
+                })
+            },
+        )
+        .await
 }
 
 #[tauri::command]
@@ -480,31 +499,30 @@ async fn transcribe_track(
     fs::create_dir_all(&output)
         .map_err(|error| format!("Unable to create the transcription folder: {error}"))?;
 
-    let mut active = state.cancel_sender.lock().await;
-    if active.is_some() {
-        return Err("An audio operation is already running.".into());
-    }
-    let (cancel_sender, mut cancel_receiver) = watch::channel(false);
-    *active = Some(cancel_sender);
-    drop(active);
+    let beat_source = project
+        .join("drums.wav")
+        .is_file()
+        .then(|| project.join("drums.wav"));
 
-    let result = run_transcription_engine(
-        &app,
-        &input,
-        &output,
-        project
-            .join("drums.wav")
-            .is_file()
-            .then(|| project.join("drums.wav")),
-        track,
-        bass_tuning.unwrap_or(BassTuning::Eadg),
-        bass_engine.unwrap_or(BassTranscriptionEngine::BasicPitch),
-        None,
-        &mut cancel_receiver,
-    )
-    .await;
-    *state.cancel_sender.lock().await = None;
-    result
+    state
+        .run_exclusive(
+            "An audio operation is already running.",
+            |mut cancel_receiver| async move {
+                run_transcription_engine(
+                    &app,
+                    &input,
+                    &output,
+                    beat_source,
+                    track,
+                    bass_tuning.unwrap_or(BassTuning::Eadg),
+                    bass_engine.unwrap_or(BassTranscriptionEngine::BasicPitch),
+                    None,
+                    &mut cancel_receiver,
+                )
+                .await
+            },
+        )
+        .await
 }
 
 #[tauri::command]
@@ -535,31 +553,28 @@ async fn requantize_transcription(
         ));
     }
 
-    let mut active = state.cancel_sender.lock().await;
-    if active.is_some() {
-        return Err("An audio operation is already running.".into());
-    }
-    let (cancel_sender, mut cancel_receiver) = watch::channel(false);
-    *active = Some(cancel_sender);
-    drop(active);
-
-    let result = run_transcription_engine(
-        &app,
-        &events_file,
-        &output,
-        None,
-        track,
-        BassTuning::Eadg,
-        BassTranscriptionEngine::BasicPitch,
-        Some(ManualTiming {
-            bpm,
-            first_measure_seconds,
-        }),
-        &mut cancel_receiver,
-    )
-    .await;
-    *state.cancel_sender.lock().await = None;
-    result
+    state
+        .run_exclusive(
+            "An audio operation is already running.",
+            |mut cancel_receiver| async move {
+                run_transcription_engine(
+                    &app,
+                    &events_file,
+                    &output,
+                    None,
+                    track,
+                    BassTuning::Eadg,
+                    BassTranscriptionEngine::BasicPitch,
+                    Some(ManualTiming {
+                        bpm,
+                        first_measure_seconds,
+                    }),
+                    &mut cancel_receiver,
+                )
+                .await
+            },
+        )
+        .await
 }
 
 #[tauri::command]
@@ -1658,6 +1673,37 @@ mod session_tests {
         .unwrap();
         assert!(validate_transcription(&invalid, "bass").is_err());
         assert!(validate_transcription(&invalid, "drums").is_err());
+    }
+
+    #[test]
+    fn a_failed_operation_releases_the_runner() {
+        let state = RunnerState::default();
+        tauri::async_runtime::block_on(async {
+            let failed = state
+                .run_exclusive("busy", |_| async {
+                    Err::<(), String>("setup failed".into())
+                })
+                .await;
+            assert_eq!(failed, Err("setup failed".into()));
+
+            let next = state.run_exclusive("busy", |_| async { Ok(7) }).await;
+            assert_eq!(next, Ok(7));
+        });
+    }
+
+    #[test]
+    fn a_running_operation_rejects_a_second_one() {
+        let state = RunnerState::default();
+        tauri::async_runtime::block_on(async {
+            let outcome = state
+                .run_exclusive("outer busy", |_| async {
+                    state
+                        .run_exclusive("busy", |_| async { Ok::<(), String>(()) })
+                        .await
+                })
+                .await;
+            assert_eq!(outcome, Err("busy".into()));
+        });
     }
 
     #[test]

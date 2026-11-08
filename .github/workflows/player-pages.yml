@@ -1,0 +1,51 @@
+name: Player on GitHub Pages
+
+# Publishes the iPhone stem player (app/player.html) as a static site. Songs
+# never leave the phone: the page only reads files picked from Files.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "app/**"
+      - ".github/workflows/player-pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: player-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - name: Install frontend
+        working-directory: app
+        run: npm ci
+      - name: Build the player
+        working-directory: app
+        run: npm run build:player
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: app/dist-player
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}player.html
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -11,6 +11,21 @@ import {
 } from "../domain/types";
 import { clampTime } from "../domain/transport";
 
+/** Where song time `offsetSeconds` falls on the audio clock for one playback run. */
+export interface PlaybackClock {
+  context: AudioContext;
+  startAt: number;
+  offsetSeconds: number;
+  leadInSeconds: number;
+  duration: number;
+}
+
+/** Follows playback runs, for sounds that must stay in step with the stems. */
+export interface PlaybackListener {
+  start(clock: PlaybackClock): void;
+  stop(): void;
+}
+
 type AudioContextFactory = () => AudioContext;
 type BinaryLoader = (path: string, signal?: AbortSignal) => Promise<ArrayBuffer>;
 
@@ -35,6 +50,7 @@ export class AudioEngine {
   private loadedDuration = 0;
   private spectrograms: Partial<Record<SpectralStemName, Promise<SpectrogramData>>> = {};
   private spectrogramWorkers = new Map<Worker, () => void>();
+  private playbackListeners = new Set<PlaybackListener>();
 
   constructor(
     contextFactory: AudioContextFactory = () => new AudioContext(),
@@ -50,6 +66,14 @@ export class AudioEngine {
 
   get isPlaying(): boolean {
     return this.playing;
+  }
+
+  /** Bytes held by the decoded PCM of every loaded stem. */
+  get decodedBytes(): number {
+    return STEM_NAMES.reduce((total, name) => {
+      const buffer = this.buffers[name];
+      return total + (buffer ? buffer.length * buffer.numberOfChannels * Float32Array.BYTES_PER_ELEMENT : 0);
+    }, 0);
   }
 
   get currentTime(): number {
@@ -169,7 +193,19 @@ export class AudioEngine {
     return request;
   }
 
-  async play(seconds = this.offsetSeconds): Promise<void> {
+  addPlaybackListener(listener: PlaybackListener): () => void {
+    this.playbackListeners.add(listener);
+    return () => {
+      listener.stop();
+      this.playbackListeners.delete(listener);
+    };
+  }
+
+  /**
+   * Starts the stems at `seconds`. A lead-in delays them, for example for a
+   * metronome count-in; `currentTime` stays at `seconds` until they start.
+   */
+  async play(seconds = this.offsetSeconds, leadInSeconds = 0): Promise<void> {
     if (!this.hasAllBuffers() || this.loadedDuration <= 0) return;
     const context = this.ensureContext();
     const playGeneration = ++this.generation;
@@ -180,7 +216,8 @@ export class AudioEngine {
 
     this.stopSources();
     this.offsetSeconds = offset;
-    const startAt = context.currentTime + START_LATENCY_SECONDS;
+    const leadIn = Number.isFinite(leadInSeconds) ? Math.max(0, leadInSeconds) : 0;
+    const startAt = context.currentTime + START_LATENCY_SECONDS + leadIn;
     this.contextStartedAt = startAt;
     this.playing = true;
     const generation = ++this.generation;
@@ -198,7 +235,11 @@ export class AudioEngine {
       this.offsetSeconds = this.loadedDuration;
       this.playing = false;
       this.sources = {};
+      this.playbackListeners.forEach((listener) => listener.stop());
     };
+
+    const clock = { context, startAt, offsetSeconds: offset, leadInSeconds: leadIn, duration: this.loadedDuration };
+    this.playbackListeners.forEach((listener) => listener.start(clock));
   }
 
   pause(): number {
@@ -267,6 +308,7 @@ export class AudioEngine {
 
   private stopSources(): void {
     this.generation += 1;
+    if (this.playing) this.playbackListeners.forEach((listener) => listener.stop());
     this.playing = false;
     for (const name of STEM_NAMES) {
       const source = this.sources[name];

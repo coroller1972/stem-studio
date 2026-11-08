@@ -15,7 +15,8 @@ interface TimelineProps {
   onSeek: (seconds: number) => void;
   onMarkerChange: (seconds: number) => void;
   transcriptions: ProjectTranscriptions;
-  onTranscribe: (track: TranscriptionTrack) => void;
+  /** Omitted by the mobile player, which has no transcription engine. */
+  onTranscribe?: (track: TranscriptionTrack) => void;
 }
 
 export function Timeline({
@@ -80,7 +81,7 @@ export function Timeline({
                 name={name}
                 track={tracks[name]}
                 onChange={(patch) => onTrackChange(name, patch)}
-                {...(name === "bass" || name === "drums"
+                {...(onTranscribe && (name === "bass" || name === "drums")
                   ? {
                       transcriptionStatus: transcriptions[name].status,
                       onTranscribe: () => onTranscribe(name),

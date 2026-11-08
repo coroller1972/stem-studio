@@ -1,6 +1,7 @@
 node_modules/
 app/node_modules/
 app/dist/
+app/dist-player/
 app/src-tauri/target/
 engine/.venv/
 engine/.venv*/

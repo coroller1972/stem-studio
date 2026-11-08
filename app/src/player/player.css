@@ -1,0 +1,295 @@
+/* Phone layout for the stem player. Loaded after styles.css, which targets the
+   desktop window (700px minimum width). */
+
+html.player-page,
+html.player-page body,
+html.player-page #root {
+  min-width: 0;
+  min-height: 0;
+  height: 100dvh;
+}
+
+html.player-page {
+  --controls-width: 132px;
+  --player-gutter: max(12px, env(safe-area-inset-left));
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+}
+
+.player-shell {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: 100%;
+  padding-top: env(safe-area-inset-top);
+  background: var(--bg);
+}
+
+.player-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px var(--player-gutter);
+  border-bottom: 1px solid var(--border);
+  background: #101418;
+}
+
+.player-title {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.player-title strong {
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 620;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.player-title span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.player-header-actions {
+  display: flex;
+  flex: none;
+  gap: 8px;
+}
+
+.player-header .ghost-button {
+  flex: none;
+  min-height: 36px;
+  padding: 0 12px;
+  background: #171c21;
+  color: #cbd1d6;
+  font-size: 13px;
+}
+
+.metronome-tempo {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--cyan);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.metronome-panel {
+  display: grid;
+  gap: 8px;
+  padding: 8px var(--player-gutter);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.metronome-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  font-size: 13px;
+}
+
+.metronome-row > span {
+  flex: none;
+  width: 64px;
+  color: #cbd1d6;
+}
+
+.metronome-choices {
+  display: flex;
+  flex: none;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+
+.metronome-choices button {
+  min-width: 56px;
+  height: 34px;
+  border: 0;
+  border-left: 1px solid var(--border);
+  background: var(--surface-raised);
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.metronome-choices button:first-child {
+  border-left: 0;
+}
+
+.metronome-choices button[aria-pressed="true"] {
+  background: var(--cyan-dim);
+  color: white;
+}
+
+.metronome-row .metronome-volume {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+}
+
+.metronome-missing {
+  margin: 0;
+  padding: 8px var(--player-gutter);
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.player-main {
+  display: grid;
+  min-height: 0;
+}
+
+.player-main .timeline {
+  grid-template-rows: 28px minmax(0, 1fr);
+}
+
+/* Touch: bigger targets, and no browser gesture while scrubbing or dragging. */
+.player-shell .timeline-interaction {
+  touch-action: none;
+}
+
+.player-shell .start-marker {
+  width: 32px;
+  transform: translateX(-16px);
+}
+
+.player-shell .start-marker::after,
+.player-shell .start-marker svg {
+  left: 16px;
+}
+
+.player-shell .track-controls {
+  gap: 10px;
+  padding: 8px 10px;
+}
+
+.player-shell .track-title-row h3 {
+  font-size: 14px;
+}
+
+.player-shell .track-settings {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
+
+.player-shell .toggle-pair {
+  gap: 6px;
+}
+
+.player-shell .toggle-pair button {
+  flex: 1;
+  height: 40px;
+  font-size: 14px;
+}
+
+.player-shell .volume-control input {
+  height: 4px;
+}
+
+.player-shell .volume-control input::-webkit-slider-thumb {
+  width: 22px;
+  height: 22px;
+}
+
+.player-shell .volume-control output {
+  font-size: 11px;
+}
+
+.player-shell .tracks-grid {
+  grid-template-rows: repeat(4, minmax(0, 1fr));
+}
+
+.player-shell .transport {
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-areas:
+    "controls marker"
+    "clock volume";
+  gap: 8px 12px;
+  min-height: 0;
+  padding: 10px var(--player-gutter) max(10px, env(safe-area-inset-bottom));
+}
+
+.player-shell .transport-controls {
+  grid-area: controls;
+}
+
+.player-shell .transport-controls button {
+  width: 48px;
+  height: 44px;
+}
+
+.player-shell .transport-controls .play-button {
+  width: 60px;
+}
+
+.player-shell .transport-clock {
+  grid-area: clock;
+  justify-self: start;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.player-shell .transport-clock strong {
+  font-size: 18px;
+}
+
+.player-shell .marker-readout {
+  grid-area: marker;
+  justify-self: end;
+  height: 44px;
+  padding-right: 0;
+}
+
+.player-shell .master-volume {
+  grid-area: volume;
+}
+
+.player-empty {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 14px;
+  grid-row: 1 / -1;
+  padding: 24px var(--player-gutter);
+  color: var(--muted);
+  text-align: center;
+}
+
+.player-empty svg {
+  color: var(--cyan);
+}
+
+.player-empty h1 {
+  margin: 0;
+  color: var(--text);
+  font-size: 22px;
+  font-weight: 650;
+}
+
+.player-empty p {
+  max-width: 320px;
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.player-empty .primary-button {
+  min-height: 48px;
+  padding: 0 22px;
+  font-size: 15px;
+}
+
+.player-error {
+  color: #f19a9a !important;
+}

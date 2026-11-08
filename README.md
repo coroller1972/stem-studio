@@ -274,6 +274,31 @@ demande de sélectionner son fichier `session.json`, valide que les quatre WAV r
 dossier, autorise temporairement leur lecture dans Tauri, puis recharge les waveforms et le mix
 sans exécuter Demucs ou BS-RoFormer.
 
+## Lecteur iPhone
+
+`player.html` est une web app séparée (lecture des quatre stems, mute/solo, métronome) pensée pour
+Safari sur iPhone, sans licence développeur Apple. Une session se transfère en un seul fichier :
+
+```bash
+python3 scripts/export_iphone_package.py ~/Music/tracks/"Ma Chanson.stemstudio" ~/Desktop/iphone
+```
+
+Le script produit `Ma Chanson.stems.zip` : les quatre stems en AAC (quelques Mo chacun), stockés
+sans compression pour que le téléphone les lise en place, et un `player.json` avec le mix et le
+marqueur de la session et la grille de temps du métronome. Le tempo vient de `--bpm` (avec
+`--downbeat`), sinon de la transcription basse ou batterie la plus récente (y compris un tempo
+corrigé dans l'éditeur de transcription), sinon du beat tracker du moteur.
+
+Côté lecteur, le métronome propose un décompte d'une ou deux mesures calé sur la grille du morceau
+et un clic pendant la lecture. Les battements détectés sont lissés (médianes puis moindres carrés
+sur ±4 temps) pour gommer les pas de trame du beat tracker et ignorer un faux battement d'intro.
+
+```bash
+npm --prefix app run dev:player       # http://localhost:1430/player.html
+npm --prefix app run build:player     # app/dist-player, site statique
+npm --prefix app run preview:player   # sert le build sur le réseau local, port 4173
+```
+
 ## Synchronisation audio
 
 `AudioEngine` décode les quatre WAV dans un seul `AudioContext`. Chaque stem possède un

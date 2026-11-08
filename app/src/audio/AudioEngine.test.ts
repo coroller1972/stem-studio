@@ -169,6 +169,34 @@ describe("AudioEngine asynchronous lifecycle", () => {
     expect(context.createBufferSource).not.toHaveBeenCalled();
   });
 
+  it("delays the stems by the lead-in and tells playback listeners when runs start and stop", async () => {
+    const { context, factory } = audioFixture();
+    const sources: Array<{ start: ReturnType<typeof vi.fn>; stop: ReturnType<typeof vi.fn> }> = [];
+    context.currentTime = 3;
+    context.createBufferSource.mockImplementation(() => {
+      const source = { buffer: null, onended: null, connect: vi.fn(), disconnect: vi.fn(), start: vi.fn(), stop: vi.fn() };
+      sources.push(source);
+      return source;
+    });
+    const engine = new AudioEngine(factory, async () => new ArrayBuffer(8));
+    await engine.load(STEM_PATHS);
+    const listener = { start: vi.fn(), stop: vi.fn() };
+    const remove = engine.addPlaybackListener(listener);
+
+    await engine.play(4, 1.5);
+    expect(sources).toHaveLength(4);
+    for (const source of sources) expect(source.start).toHaveBeenCalledWith(4.55, 4);
+    expect(listener.start).toHaveBeenCalledWith(expect.objectContaining({ startAt: 4.55, offsetSeconds: 4, leadInSeconds: 1.5, duration: 10 }));
+    context.currentTime = 4;
+    expect(engine.currentTime).toBe(4);
+
+    engine.pause();
+    expect(listener.stop).toHaveBeenCalledTimes(1);
+    remove();
+    await engine.play(2);
+    expect(listener.start).toHaveBeenCalledTimes(1);
+  });
+
   it("settles pending spectrogram requests on disposal", async () => {
     const terminate = vi.fn();
     vi.stubGlobal("Worker", class {

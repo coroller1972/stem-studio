@@ -13,6 +13,7 @@ from typing import Any
 from domain import CallbackProgressReporter
 from errors import SeparationError, TranscriptionError
 from factory import create_separator
+from player_package import ManualTempo, PlayerExportError, export_player_package
 from registry import DEFAULT_PROFILE_ID, PROFILE_REGISTRY, get_profile
 from transcription_domain import TranscriptionProgressReporter
 from transcription_pipeline import TranscriptionEngine
@@ -70,12 +71,40 @@ def build_parser() -> argparse.ArgumentParser:
         requantize.add_argument("--output", type=Path, required=True)
         requantize.add_argument("--bpm", type=float, required=True)
         requantize.add_argument("--first-measure-seconds", type=float, required=True)
+    export = subparsers.add_parser("export-player", help="Pack the four stems for the iPhone stem player")
+    export.add_argument("project", type=Path, help="Folder holding vocals.wav, drums.wav, bass.wav and other.wav")
+    export.add_argument("--output", type=Path, required=True, help="Destination .zip")
+    export.add_argument("--name", required=True, help="Song name shown by the player")
+    export.add_argument("--mix", help="JSON object with startMarkerSeconds, masterVolume and tracks")
+    export.add_argument("--bpm", type=float, help="Steady tempo instead of the detected one")
+    export.add_argument("--downbeat", type=float, default=0.0, help="With --bpm: time of a bar's first beat")
+    export.add_argument("--beats-per-bar", type=int)
+    export.add_argument("--no-tempo", action="store_true", help="Leave the metronome out")
     return parser
 
 
 def run(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        if args.command == "export-player":
+            mix = json.loads(args.mix) if args.mix else None
+            if mix is not None and not isinstance(mix, dict):
+                raise PlayerExportError("The mix settings are invalid.")
+            package = export_player_package(
+                args.project,
+                args.output,
+                source_name=args.name,
+                mix=mix,
+                manual_tempo=ManualTempo(args.bpm, args.downbeat) if args.bpm is not None else None,
+                beats_per_bar=args.beats_per_bar,
+                include_tempo=not args.no_tempo,
+                progress=lambda progress, message: emit(
+                    {"type": "export_progress", "progress": progress, "message": message}
+                ),
+            )
+            emit({"type": "export_completed", "result": package.to_payload()})
+            return 0
+
         if args.command in ("requantize-bass", "requantize-drums"):
             track = "bass" if args.command == "requantize-bass" else "drums"
             reporter = TranscriptionProgressReporter(
@@ -162,6 +191,9 @@ def run(argv: list[str] | None = None) -> int:
         result = separator.separate(args.input, args.output, progress)
         emit({"type": "completed", "stems": result.stems_payload()})
         return 0
+    except PlayerExportError as error:
+        emit({"type": "export_error", "message": error.user_message, "detail": str(error)})
+        return 1
     except TranscriptionError as error:
         emit({"type": "transcription_error", "message": error.user_message, "detail": str(error)})
         return 1
@@ -169,14 +201,17 @@ def run(argv: list[str] | None = None) -> int:
         emit({"type": "error", "message": error.user_message, "detail": str(error)})
         return 1
     except KeyboardInterrupt:
-        event_type = "transcription_error" if _is_transcription_command(args.command) else "error"
-        emit({"type": event_type, "message": "Operation was cancelled."})
+        emit({"type": _error_event_type(args.command), "message": "Operation was cancelled."})
         return 130
     except Exception as error:  # A raw traceback is logged to stderr, never sent to the UI.
         traceback.print_exc(file=sys.stderr)
-        event_type = "transcription_error" if _is_transcription_command(args.command) else "error"
-        message = "Transcription failed." if _is_transcription_command(args.command) else "Stem separation failed."
-        emit({"type": event_type, "message": message, "detail": str(error)})
+        if args.command == "export-player":
+            message = "Unable to export the iPhone package."
+        elif _is_transcription_command(args.command):
+            message = "Transcription failed."
+        else:
+            message = "Stem separation failed."
+        emit({"type": _error_event_type(args.command), "message": message, "detail": str(error)})
         return 1
 
 
@@ -185,6 +220,12 @@ def _models_dir_from_environment() -> Path | None:
 
     value = os.environ.get("STEM_STUDIO_MODELS_DIR")
     return Path(value) if value else None
+
+
+def _error_event_type(command: str) -> str:
+    if command == "export-player":
+        return "export_error"
+    return "transcription_error" if _is_transcription_command(command) else "error"
 
 
 def _is_transcription_command(command: str) -> bool:

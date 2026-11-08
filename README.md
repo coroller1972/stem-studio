@@ -283,17 +283,20 @@ chaque push sur `main` qui touche `app/`. Dans Safari, Partager → Sur l'écran
 comme une app, utilisable hors ligne : le service worker garde la page et ses fichiers dès la
 première visite. Les morceaux restent sur le téléphone, la page ne les envoie nulle part.
 
-Une session se transfère en un seul fichier :
+Un morceau se transfère en un seul fichier, `Ma Chanson.stems.zip`. Dans Stem Studio, le bouton
+téléphone de l'en-tête (« Export for iPhone ») l'écrit avec le mix et le marqueur affichés à
+l'écran. Hors de l'app, le script fait de même à partir d'une session sauvegardée :
 
 ```bash
 python3 scripts/export_iphone_package.py ~/Music/tracks/"Ma Chanson.stemstudio" ~/Desktop/iphone
 ```
 
-Le script produit `Ma Chanson.stems.zip` : les quatre stems en AAC (quelques Mo chacun), stockés
-sans compression pour que le téléphone les lise en place, et un `player.json` avec le mix et le
-marqueur de la session et la grille de temps du métronome. Le tempo vient de `--bpm` (avec
-`--downbeat`), sinon de la transcription basse ou batterie la plus récente (y compris un tempo
-corrigé dans l'éditeur de transcription), sinon du beat tracker du moteur.
+Les deux passent par `engine/player_package.py` (commande `export-player` du moteur). Le paquet
+contient les quatre stems en AAC (quelques Mo chacun, convertis par `afconvert`), stockés sans
+compression pour que le téléphone les lise en place, et un `player.json` avec le mix, le marqueur
+et la grille de temps du métronome. Le tempo vient de `--bpm` (avec `--downbeat`, script seulement),
+sinon de la transcription basse ou batterie la plus récente (y compris un tempo corrigé dans
+l'éditeur de transcription), sinon du beat tracker du moteur (une dizaine de secondes).
 
 Côté lecteur, le métronome propose un décompte d'une ou deux mesures calé sur la grille du morceau
 et un clic pendant la lecture. Les battements détectés sont lissés (médianes puis moindres carrés

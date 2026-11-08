@@ -171,15 +171,30 @@ def track_tempo(project: Path) -> Mapping[str, object]:
             return LibrosaBeatTracker().track(mix).to_payload()
 
 
+AFCONVERT = Path("/usr/bin/afconvert")
+
+
+def aac_command(source: Path, destination: Path) -> list[str]:
+    if AFCONVERT.is_file():
+        # High-quality VBR AAC keeps each stem at a few megabytes and, unlike a
+        # fixed bit rate, accepts any sample rate. afconvert ships with macOS.
+        return [str(AFCONVERT), "-f", "m4af", "-d", "aac", "-s", "3", "-u", "vbrq", "110", "-q", "127",
+                str(source), str(destination)]
+
+    from audio_io import resolve_ffmpeg_executable
+
+    ffmpeg = resolve_ffmpeg_executable()
+    if not ffmpeg:
+        raise PlayerExportError("Unable to convert stems to AAC.", "ffmpeg executable not found")
+    # Elsewhere (Linux), FFmpeg's native AAC encoder is LGPL-compatible. 192 kb/s
+    # stereo is close to afconvert's VBR quality 110 and works at any sample rate.
+    return [ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-i", str(source),
+            "-vn", "-map_metadata", "-1", "-c:a", "aac", "-b:a", "192k", "-movflags", "+faststart",
+            "-f", "mp4", str(destination)]
+
+
 def convert_to_aac(source: Path, destination: Path) -> None:
-    # High-quality VBR AAC keeps each stem at a few megabytes and, unlike a
-    # fixed bit rate, accepts any sample rate. afconvert ships with macOS.
-    result = subprocess.run(
-        ["/usr/bin/afconvert", "-f", "m4af", "-d", "aac", "-s", "3", "-u", "vbrq", "110", "-q", "127",
-         str(source), str(destination)],
-        capture_output=True,
-        text=True,
-    )
+    result = subprocess.run(aac_command(source, destination), capture_output=True, text=True)
     if result.returncode != 0:
         raise PlayerExportError(f"Unable to convert {source.name} to AAC.", result.stderr.strip() or None)
 

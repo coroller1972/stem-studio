@@ -97,11 +97,12 @@ class BSRoFormerSeparator:
             except SeparationError:
                 raise
             except Exception as device_error:
-                if selected_device != "mps":
+                if selected_device == "cpu":
                     raise SeparationError("High-quality separation failed.", str(device_error)) from device_error
-                progress.report(0.14, "MPS failed; retrying high quality on CPU")
+                accelerator = selected_device.upper()
+                progress.report(0.14, f"{accelerator} failed; retrying high quality on CPU")
                 final_device = "cpu"
-                warnings = ("MPS inference failed; CPU fallback was used.",)
+                warnings = (f"{accelerator} inference failed; CPU fallback was used.",)
                 try:
                     manifest = self._infer_with_heartbeat(
                         input_folder,

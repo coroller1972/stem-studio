@@ -1,4 +1,14 @@
+import sys
+
 from PyInstaller.utils.hooks import collect_all, collect_submodules
+
+IS_MACOS = sys.platform == "darwin"
+
+# Basic Pitch picks its backend from what is importable: CoreML on macOS. On
+# Linux the frozen engine ships ONNX Runtime (a few MB, identical outputs)
+# instead of TensorFlow (~1.4 GB), which pip still installs as a dependency.
+basic_pitch_backend = "coremltools" if IS_MACOS else "onnxruntime"
+excludes = [] if IS_MACOS else ["tensorflow", "tensorboard", "keras", "tflite_runtime", "coremltools"]
 
 datas = []
 binaries = []
@@ -13,7 +23,7 @@ for package in (
     "julius",
     "basic_pitch",
     "torchcrepe",
-    "coremltools",
+    basic_pitch_backend,
     "librosa",
     "mido",
     "drumscript",
@@ -38,7 +48,7 @@ analysis = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=excludes,
     noarchive=False,
 )
 pyz = PYZ(analysis.pure)
@@ -53,7 +63,7 @@ exe = EXE(
     strip=False,
     upx=False,
     console=True,
-    target_arch="arm64",
+    target_arch="arm64" if IS_MACOS else None,
     codesign_identity=None,
 )
 coll = COLLECT(

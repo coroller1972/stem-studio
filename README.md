@@ -2,7 +2,8 @@
 
 ![stem studio](./docs/stem-studio-design-reference.png)
 
-Stem Studio est une application desktop macOS qui sépare un MP3 ou WAV en quatre stems avec un
+Stem Studio est une application desktop macOS et Linux (voir [Linux (Fedora)](#linux-fedora)) qui
+sépare un MP3 ou WAV en quatre stems avec un
 profil Standard (Demucs `htdemucs`) ou High (BS-RoFormer MUSDB18HQ), puis les lit et les mixe sur
 une timeline parfaitement synchronisée. Les stems basse et batterie peuvent ensuite être
 transcrits en événements musicaux, tablature/grille, MIDI et MusicXML.
@@ -394,6 +395,58 @@ silences, les cordes/cases de basse et les positions de percussion. Ouvrir ensui
 correspondant et écouter en parallèle de l'original. Guitar Pro, Dorico ou Sibelius peuvent aussi
 importer le MusicXML ; aucun format Guitar Pro natif n'est écrit par ce MVP.
 
+## Linux (Fedora)
+
+L'application fonctionne sous Fedora x86_64, avec accélération CUDA sur GPU NVIDIA, en mode
+développement comme en RPM installé.
+
+Dépendances système (Tauri 2, FFmpeg, GStreamer pour l'audio de la WebView) :
+
+```bash
+sudo dnf install webkit2gtk4.1-devel gtk3-devel libsoup3-devel openssl-devel librsvg2-devel \
+  ffmpeg gstreamer1-plugins-good gstreamer1-plugins-base
+```
+
+Fedora fournit un Python trop récent pour `torch<2.9` ; installer Python 3.11 via `dnf install
+python3.11` ou [uv](https://docs.astral.sh/uv/), puis créer le venv attendu par le runner Rust :
+
+```bash
+cd engine
+uv python install 3.11
+uv venv --python 3.11 --seed .venv311
+.venv311/bin/python -m pip install -r requirements.txt
+.venv311/bin/python -c 'import torch; print(torch.__version__, torch.cuda.is_available())'
+```
+
+`requirements.lock` décrit l'environnement macOS arm64 et ne s'applique pas ici. Sous Linux, pip
+installe les wheels PyTorch CUDA par défaut (pilote NVIDIA propriétaire requis ; sans GPU, le
+moteur bascule sur CPU) et Basic Pitch utilise TensorFlow au lieu de CoreML.
+
+Le lancement est identique (`cd app && npm run tauri dev`). Différences avec macOS :
+
+- les modèles et projets sont stockés sous `~/.local/share/studio.stem.desktop/` ;
+- l'export iPhone encode l'AAC avec l'encodeur natif de FFmpeg (192 kb/s) au lieu d'`afconvert` ;
+- FFmpeg est cherché dans `STEM_STUDIO_FFMPEG`, à côté de l'exécutable, puis dans `/usr/bin`.
+
+### RPM local
+
+```bash
+sudo dnf install rpm-build   # une fois
+scripts/build-linux-rpm.sh
+sudo dnf install app/src-tauri/target/rpmbuild/RPMS/x86_64/stem-studio-*.rpm
+```
+
+Le script gèle le moteur avec PyInstaller depuis `engine/.venv311`, compile le binaire Tauri en
+release (`--no-bundle`) puis appelle `rpmbuild` avec `packaging/linux/stem-studio.spec`. Le paquet
+installe `/usr/bin/stem-studio`, le moteur sous `/usr/lib/Stem Studio/binaries/stem-engine/`, une
+entrée de menu et les icônes. Il dépend du FFmpeg système (`ffmpeg-free` ou celui de RPM Fusion)
+au lieu d'embarquer un binaire.
+
+Le moteur embarque PyTorch et ses bibliothèques CUDA : le paquet pèse plusieurs Go. TensorFlow en
+est exclu, Basic Pitch y tourne avec ONNX Runtime (sorties identiques). Le pilote NVIDIA fournit
+`libcuda` ; sans lui, le moteur bascule sur CPU. Ce RPM n'est ni signé ni prévu pour être
+redistribué : il sert à installer l'application sur sa propre machine.
+
 ## Construction de l'application locale
 
 Le moteur Python est transformé en bundle autonome PyInstaller `onedir`, sans aucun poids de modèle.
@@ -540,12 +593,13 @@ artefact séparés, puis éventuellement un assemblage maîtrisé ; ce n'est pas
 la procédure précédente : sans le fichier dans `binaries/`, Tauri refuse volontairement le build
 configuré, afin de ne pas livrer une application incapable de séparer l'audio.
 
-## MPS et fallback CPU
+## Accélérateur GPU et fallback CPU
 
-Le moteur choisit MPS quand `torch.backends.mps.is_available()` est vrai. Demucs et certaines
+Le moteur choisit CUDA quand `torch.cuda.is_available()` est vrai (Linux avec GPU NVIDIA), sinon
+MPS quand `torch.backends.mps.is_available()` est vrai (Apple Silicon), sinon le CPU. Demucs et certaines
 versions de PyTorch peuvent néanmoins rencontrer une opération non supportée, une pression
-mémoire ou un comportement différent selon la durée du morceau. Toute erreur de l'essai MPS
-provoque une nouvelle instance `htdemucs` sur CPU. Si le retry échoue, seule une erreur courte est
+mémoire ou un comportement différent selon la durée du morceau. Toute erreur de l'essai sur
+accélérateur (MPS ou CUDA) provoque une nouvelle instance `htdemucs` sur CPU. Si le retry échoue, seule une erreur courte est
 envoyée à l'UI ; le détail reste dans stderr.
 
 Le retry complet double potentiellement le temps d'attente. C'est volontaire : réutiliser un

@@ -100,6 +100,31 @@ class DemucsSeparatorTest(unittest.TestCase):
             self.assertEqual(result.device, "cpu")
             self.assertEqual(result.warnings, ("MPS inference failed; CPU fallback was used.",))
 
+    def test_cuda_failure_retries_on_cpu_and_records_warning(self) -> None:
+        devices: list[str] = []
+
+        def infer(source: Path, device: str, model_id: str, audio_io: Any):
+            devices.append(device)
+            if device == "cuda":
+                raise RuntimeError("CUDA out of memory")
+            return fake_stems(), 44_100
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "song.wav"
+            source.write_bytes(b"audio")
+            separator = DemucsSeparator(
+                audio_io=FakeAudioIO(),
+                device_selector=lambda: "cuda",
+                inference_runner=infer,
+            )
+
+            result = separator.separate(source, root / "project", RecordingProgress())
+
+            self.assertEqual(devices, ["cuda", "cpu"])
+            self.assertEqual(result.device, "cpu")
+            self.assertEqual(result.warnings, ("CUDA inference failed; CPU fallback was used.",))
+
 
 if __name__ == "__main__":
     unittest.main()

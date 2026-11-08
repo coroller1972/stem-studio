@@ -2,6 +2,7 @@
   "name": "Stem Player",
   "short_name": "Stems",
   "description": "Replay the four stems of a song with mute, solo and volume.",
+  "id": "./player.html",
   "start_url": "./player.html",
   "scope": "./",
   "display": "standalone",

@@ -277,7 +277,13 @@ sans exécuter Demucs ou BS-RoFormer.
 ## Lecteur iPhone
 
 `player.html` est une web app séparée (lecture des quatre stems, mute/solo, métronome) pensée pour
-Safari sur iPhone, sans licence développeur Apple. Une session se transfère en un seul fichier :
+Safari sur iPhone, sans licence développeur Apple. Il est publié sur
+<https://coroller1972.github.io/stem-studio/player.html> par le workflow `player-pages.yml` à
+chaque push sur `main` qui touche `app/`. Dans Safari, Partager → Sur l'écran d'accueil l'installe
+comme une app, utilisable hors ligne : le service worker garde la page et ses fichiers dès la
+première visite. Les morceaux restent sur le téléphone, la page ne les envoie nulle part.
+
+Une session se transfère en un seul fichier :
 
 ```bash
 python3 scripts/export_iphone_package.py ~/Music/tracks/"Ma Chanson.stemstudio" ~/Desktop/iphone

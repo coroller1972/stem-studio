@@ -9,7 +9,7 @@ from typing import Any, Sequence
 
 from audio_io import FfmpegAudioIO
 from errors import TranscriptionError
-from runtime import preferred_torch_device
+from runtime import preferred_torch_device, release_accelerator_memory
 from transcription_domain import NoteEvent
 
 # The v5 decoder keeps TorchCREPE in its stable range, recovers low B through
@@ -120,8 +120,7 @@ class TorchCrepeBassTranscriber:
                 spectral_frequencies_hz=spectral_frequencies,
             )
             del frequencies, periodicities
-            if preferred_torch_device() == "mps":
-                torch.mps.empty_cache()
+            release_accelerator_memory(preferred_torch_device())
             return segment_pitch_track(track, self.settings)
         except TranscriptionError:
             raise
@@ -135,8 +134,8 @@ class TorchCrepeBassTranscriber:
         except Exception:
             if device == "cpu":
                 raise
-            # MPS support depends on the installed PyTorch build. A clean CPU
-            # retry keeps the experimental engine usable on older macOS setups.
+            # Accelerator support (MPS, CUDA) depends on the installed PyTorch
+            # build and drivers. A clean CPU retry keeps the engine usable.
             return self._predict_on_device(torchcrepe, audio, "cpu")
 
     def _predict_on_device(self, torchcrepe: Any, audio: Any, device: str) -> tuple[Any, Any]:

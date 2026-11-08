@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Stem Studio
+GenericName=Stem separation
+Comment=Separate and mix audio stems
+Exec=stem-studio
+Icon=stem-studio
+Terminal=false
+Categories=AudioVideo;Audio;
+Keywords=stems;demucs;music;separation;
+StartupWMClass=stem-studio

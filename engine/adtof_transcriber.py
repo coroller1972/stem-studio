@@ -61,7 +61,7 @@ class AdtofDrumTranscriber:
                 with torch.no_grad():
                     activations = model(audio).cpu().numpy()
         except Exception as device_error:
-            if device != "mps":
+            if device == "cpu":
                 raise TranscriptionError("Drum transcription failed.", str(device_error)) from device_error
             try:
                 with redirect_stdout(sys.stderr):

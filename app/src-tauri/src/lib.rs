@@ -1005,6 +1005,9 @@ async fn run_engine(
         .ok_or_else(|| "The engine did not return the separated stems.".into())
 }
 
+/// Name of a single-file sidecar following Tauri's `<name>-<target triple>` convention.
+const ENGINE_TRIPLE_NAME: &str = concat!("stem-engine-", env!("STEM_STUDIO_TARGET_TRIPLE"));
+
 fn resolve_engine_command(app: &AppHandle) -> Result<(PathBuf, Vec<String>), String> {
     if cfg!(debug_assertions) {
         let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -1033,15 +1036,15 @@ fn resolve_engine_command(app: &AppHandle) -> Result<(PathBuf, Vec<String>), Str
         resource_dir.join("binaries/stem-engine/stem-engine"),
         resource_dir.join("stem-engine/stem-engine"),
         resource_dir.join("stem-engine"),
-        resource_dir.join("stem-engine-aarch64-apple-darwin"),
-        resource_dir.join("binaries/stem-engine-aarch64-apple-darwin"),
+        resource_dir.join(ENGINE_TRIPLE_NAME),
+        resource_dir.join("binaries").join(ENGINE_TRIPLE_NAME),
         executable_dir
             .as_ref()
             .map(|path| path.join("stem-engine"))
             .unwrap_or_default(),
         executable_dir
             .as_ref()
-            .map(|path| path.join("stem-engine-aarch64-apple-darwin"))
+            .map(|path| path.join(ENGINE_TRIPLE_NAME))
             .unwrap_or_default(),
     ];
     let executable = candidates
@@ -1070,6 +1073,7 @@ fn resolve_ffmpeg_path(app: &AppHandle) -> Option<PathBuf> {
         PathBuf::from("/opt/ffmpeg/ffmpeg"),
         PathBuf::from("/opt/homebrew/bin/ffmpeg"),
         PathBuf::from("/usr/local/bin/ffmpeg"),
+        PathBuf::from("/usr/bin/ffmpeg"),
     ];
     candidates.into_iter().find(|path| path.is_file())
 }

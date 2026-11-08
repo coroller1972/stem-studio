@@ -14,7 +14,8 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import main
-from player_package import ManualTempo, PlayerExportError, export_player_package
+import player_package
+from player_package import ManualTempo, PlayerExportError, aac_command, export_player_package
 
 MIX = {
     "currentTimeSeconds": 42.0,
@@ -34,6 +35,31 @@ def write_wav(path: Path, seconds: float, sample_rate: int = 8_000) -> None:
 
 def fake_converter(source: Path, destination: Path) -> None:
     destination.write_bytes(f"aac:{source.stem}".encode())
+
+
+class AacCommandTest(unittest.TestCase):
+    def test_uses_afconvert_when_available(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fake_afconvert = Path(directory) / "afconvert"
+            fake_afconvert.write_text("")
+            with patch.object(player_package, "AFCONVERT", fake_afconvert):
+                command = aac_command(Path("bass.wav"), Path("bass.m4a"))
+        self.assertEqual(command[0], str(fake_afconvert))
+        self.assertEqual(command[-2:], ["bass.wav", "bass.m4a"])
+
+    def test_falls_back_to_ffmpeg_native_aac(self) -> None:
+        with patch.object(player_package, "AFCONVERT", Path("/nonexistent/afconvert")), \
+                patch("audio_io.resolve_ffmpeg_executable", return_value="/usr/bin/ffmpeg"):
+            command = aac_command(Path("bass.wav"), Path("bass.m4a"))
+        self.assertEqual(command[0], "/usr/bin/ffmpeg")
+        self.assertIn("aac", command)
+        self.assertEqual(command[-1], "bass.m4a")
+
+    def test_reports_a_missing_encoder(self) -> None:
+        with patch.object(player_package, "AFCONVERT", Path("/nonexistent/afconvert")), \
+                patch("audio_io.resolve_ffmpeg_executable", return_value=None):
+            with self.assertRaises(PlayerExportError):
+                aac_command(Path("bass.wav"), Path("bass.m4a"))
 
 
 class PlayerPackageTest(unittest.TestCase):

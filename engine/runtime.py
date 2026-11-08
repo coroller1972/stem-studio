@@ -38,6 +38,23 @@ def preferred_torch_device() -> str:
     try:
         import torch
 
-        return "mps" if torch.backends.mps.is_available() else "cpu"
+        if torch.cuda.is_available():
+            return "cuda"
+        if torch.backends.mps.is_available():
+            return "mps"
     except Exception:
-        return "cpu"
+        pass
+    return "cpu"
+
+
+def release_accelerator_memory(device: str) -> None:
+    """Return cached allocator memory to the GPU driver after a large inference."""
+    try:
+        import torch
+
+        if device == "cuda":
+            torch.cuda.empty_cache()
+        elif device == "mps":
+            torch.mps.empty_cache()
+    except Exception:
+        pass

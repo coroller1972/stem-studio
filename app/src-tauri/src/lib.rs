@@ -348,6 +348,19 @@ struct SessionManifest {
     transcriptions: SessionTranscriptions,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PlayerPackage {
+    path: String,
+    tempo_bpm: Option<f64>,
+    tempo_source: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct PlayerExportCompletedEvent {
+    result: PlayerPackage,
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct SavedSession {
@@ -608,6 +621,159 @@ async fn export_transcription_file(
     })
     .await
     .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+async fn export_player_package(
+    app: AppHandle,
+    state: State<'_, RunnerState>,
+    project_path: String,
+    destination_path: String,
+    source_name: String,
+    mix: SessionState,
+) -> Result<PlayerPackage, String> {
+    validate_session_state(&mix)?;
+    let project = PathBuf::from(project_path);
+    if !project.is_dir() {
+        return Err("The current stem project could not be found.".into());
+    }
+    let destination = validate_player_destination(Path::new(&destination_path))?;
+    let mix_json = serde_json::to_string(&mix)
+        .map_err(|error| format!("Unable to serialize the mix: {error}"))?;
+    let song_name = Path::new(&normalized_source_name(&source_name))
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("Session")
+        .to_string();
+
+    state
+        .run_exclusive(
+            "An audio operation is already running.",
+            |mut cancel_receiver| async move {
+                run_player_export(
+                    &app,
+                    &project,
+                    &destination,
+                    &song_name,
+                    &mix_json,
+                    &mut cancel_receiver,
+                )
+                .await
+            },
+        )
+        .await
+}
+
+/// The player package is a single .zip written into an existing folder.
+fn validate_player_destination(destination: &Path) -> Result<PathBuf, String> {
+    let is_zip = destination
+        .extension()
+        .and_then(|value| value.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("zip"));
+    if !is_zip {
+        return Err("The iPhone package must be saved as a .zip file.".into());
+    }
+    let parent = destination
+        .parent()
+        .filter(|parent| parent.is_dir())
+        .ok_or("The selected export folder could not be found.")?;
+    if destination.is_dir() {
+        return Err("The selected export destination is a folder.".into());
+    }
+    Ok(parent.join(
+        destination
+            .file_name()
+            .ok_or("The export destination has no name.")?,
+    ))
+}
+
+async fn run_player_export(
+    app: &AppHandle,
+    project: &Path,
+    destination: &Path,
+    song_name: &str,
+    mix_json: &str,
+    cancel: &mut watch::Receiver<bool>,
+) -> Result<PlayerPackage, String> {
+    let (program, prefix_args) = resolve_engine_command(app)?;
+    let mut command = Command::new(program);
+    command
+        .args(prefix_args)
+        .arg("export-player")
+        .arg(project)
+        .arg("--output")
+        .arg(destination)
+        .arg("--name")
+        .arg(song_name)
+        .arg("--mix")
+        .arg(mix_json)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("Unable to start the export engine: {error}"))?;
+    let stdout = child.stdout.take().ok_or("Unable to read engine output.")?;
+    let mut stderr = child.stderr.take().ok_or("Unable to read engine logs.")?;
+    let event_app = app.clone();
+    let stdout_task = tauri::async_runtime::spawn(async move {
+        let mut lines = BufReader::new(stdout).lines();
+        let mut completed = None;
+        let mut error_message = None;
+        while let Some(line) = lines.next_line().await.map_err(|error| error.to_string())? {
+            let Ok(value) = serde_json::from_str::<Value>(&line) else {
+                continue;
+            };
+            event_app
+                .emit("player-export-event", &value)
+                .map_err(|error| error.to_string())?;
+            match value.get("type").and_then(Value::as_str) {
+                Some("export_completed") => {
+                    completed = serde_json::from_value::<PlayerExportCompletedEvent>(value)
+                        .ok()
+                        .map(|event| event.result);
+                }
+                Some("export_error") => {
+                    error_message = serde_json::from_value::<ErrorEvent>(value)
+                        .ok()
+                        .map(|event| event.message);
+                }
+                _ => {}
+            }
+        }
+        Ok::<_, String>((completed, error_message))
+    });
+    let stderr_task = tauri::async_runtime::spawn(async move {
+        let mut logs = String::new();
+        stderr
+            .read_to_string(&mut logs)
+            .await
+            .map_err(|error| error.to_string())?;
+        Ok::<String, String>(logs)
+    });
+    let status = tokio::select! {
+        status = child.wait() => status.map_err(|error| error.to_string())?,
+        changed = cancel.changed() => {
+            if changed.is_ok() && *cancel.borrow() {
+                let _ = child.start_kill();
+                let _ = child.wait().await;
+                return Err("The iPhone export was cancelled.".into());
+            }
+            child.wait().await.map_err(|error| error.to_string())?
+        }
+    };
+    let (completed, error_message) = stdout_task.await.map_err(|error| error.to_string())??;
+    let logs = stderr_task.await.map_err(|error| error.to_string())??;
+    if !logs.is_empty() {
+        eprintln!("stem-engine export: {logs}");
+    }
+    if !status.success() {
+        return Err(
+            error_message.unwrap_or_else(|| "The iPhone export stopped unexpectedly.".into())
+        );
+    }
+    completed.ok_or_else(|| "The engine did not return the iPhone package.".into())
 }
 
 async fn run_transcription_engine(
@@ -1676,6 +1842,29 @@ mod session_tests {
     }
 
     #[test]
+    fn player_export_only_writes_a_zip_into_an_existing_folder() {
+        let folder = std::env::temp_dir().join(format!("stem-player-export-{}", Uuid::new_v4()));
+        fs::create_dir(&folder).unwrap();
+        assert_eq!(
+            validate_player_destination(&folder.join("Song.stems.ZIP")).unwrap(),
+            folder.join("Song.stems.ZIP")
+        );
+        assert!(validate_player_destination(&folder.join("Song.m4a"))
+            .unwrap_err()
+            .contains(".zip"));
+        assert!(
+            validate_player_destination(&folder.join("missing/Song.zip"))
+                .unwrap_err()
+                .contains("folder could not be found")
+        );
+        fs::create_dir(folder.join("Folder.zip")).unwrap();
+        assert!(validate_player_destination(&folder.join("Folder.zip"))
+            .unwrap_err()
+            .contains("is a folder"));
+        fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
     fn a_failed_operation_releases_the_runner() {
         let state = RunnerState::default();
         tauri::async_runtime::block_on(async {
@@ -1730,6 +1919,7 @@ pub fn run() {
             transcribe_track,
             requantize_transcription,
             export_transcription_file,
+            export_player_package,
             save_session,
             load_session
         ])

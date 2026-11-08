@@ -1,4 +1,4 @@
-import { FileAudio2, FolderClock, FolderOpen, Save } from "lucide-react";
+import { FileAudio2, FolderClock, FolderOpen, Save, Smartphone } from "lucide-react";
 import type { SeparationQuality } from "../domain/types";
 import { QualitySelector } from "./QualitySelector";
 
@@ -10,6 +10,7 @@ interface HeaderProps {
   onImport: () => void;
   onOpenSession: () => void;
   onSaveSession: () => void;
+  onExportForIphone: () => void;
   onQualityChange: (quality: SeparationQuality) => void;
 }
 
@@ -21,6 +22,7 @@ export function Header({
   onImport,
   onOpenSession,
   onSaveSession,
+  onExportForIphone,
   onQualityChange,
 }: HeaderProps) {
   return (
@@ -61,6 +63,16 @@ export function Header({
             title="Save session"
           >
             <Save size={16} />
+          </button>
+          <button
+            className="header-icon-button"
+            type="button"
+            onClick={onExportForIphone}
+            disabled={disabled || !canSaveSession}
+            aria-label="Export for iPhone"
+            title="Export for the iPhone player (.stems.zip)"
+          >
+            <Smartphone size={16} />
           </button>
         </div>
         <QualitySelector value={quality} disabled={disabled} onChange={onQualityChange} />

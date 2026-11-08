@@ -47,7 +47,7 @@ export class TauriSessionService {
   }
 }
 
-function sessionBaseName(sourceName: string): string {
+export function sessionBaseName(sourceName: string): string {
   const fileName = sourceName.split(/[\\/]/).pop() || "session";
   const withoutExtension = fileName.replace(/\.[^.]+$/, "");
   const sanitized = withoutExtension.replace(/[^\p{L}\p{N} _-]+/gu, "-").replace(/^[ _-]+|[ _-]+$/g, "");

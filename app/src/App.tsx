@@ -33,6 +33,7 @@ import type {
 import { resolveTransportKeyboardShortcut } from "./domain/keyboardShortcuts";
 import { isTauriRuntime, TauriSeparationService } from "./services/separationService";
 import { TauriSessionService } from "./services/sessionService";
+import { describePlayerPackage, TauriPlayerExportService } from "./services/playerExportService";
 import { TauriTranscriptionService } from "./services/transcriptionService";
 import { useProjectStore } from "./state/projectStore";
 import { ProjectOperations } from "./services/projectOperations";
@@ -43,6 +44,7 @@ const TRANSCRIPTION_BUSY_MESSAGE = "Wait for the transcription to finish, or can
 export default function App() {
   const service = useMemo(() => new TauriSeparationService(), []);
   const sessionService = useMemo(() => new TauriSessionService(), []);
+  const playerExportService = useMemo(() => new TauriPlayerExportService(), []);
   const transcriptionService = useMemo(() => new TauriTranscriptionService(), []);
   const audio = useAudioEngine();
   const operations = useMemo(() => new ProjectOperations(), []);
@@ -207,6 +209,51 @@ export default function App() {
       setProjectBusy(operations.busy);
     }
   }, [operations, quality, sessionService, setSavedSession]);
+
+  const exportForIphone = useCallback(async () => {
+    if (!isTauriRuntime()) {
+      setSessionFeedback({ kind: "error", message: "The iPhone export is available in the Tauri desktop app." });
+      return;
+    }
+    const snapshot = useProjectStore.getState();
+    if (snapshot.status !== "ready" || !snapshot.projectPath || !snapshot.source) return;
+    // A running transcription rewrites the tempo this export reads.
+    if (isTranscribing(snapshot.transcriptions)) {
+      setSessionFeedback({ kind: "error", message: TRANSCRIPTION_BUSY_MESSAGE });
+      return;
+    }
+    const signal = operations.begin();
+    if (!signal) return;
+    setProjectBusy(true);
+    try {
+      const destination = await playerExportService.chooseDestination(snapshot.source.name);
+      if (!destination || !operations.isCurrent(signal)) return;
+      setSessionFeedback({ kind: "success", message: "Exporting for iPhone…" });
+      // The mix exported is the one on screen now, saved or not.
+      const result = await playerExportService.export(
+        snapshot.projectPath,
+        destination,
+        snapshot.source.name,
+        {
+          currentTimeSeconds: snapshot.currentTime,
+          startMarkerSeconds: snapshot.startMarkerSeconds,
+          masterVolume: snapshot.masterVolume,
+          tracks: snapshot.tracks,
+        },
+        ({ message }) => {
+          if (operations.isCurrent(signal)) setSessionFeedback({ kind: "success", message: `${message}…` });
+        },
+      );
+      if (!operations.isCurrent(signal)) return;
+      setSessionFeedback({ kind: "success", message: describePlayerPackage(result) });
+    } catch (error) {
+      if (!operations.isCurrent(signal)) return;
+      setSessionFeedback({ kind: "error", message: toSessionMessage(error, "Unable to export for iPhone.") });
+    } finally {
+      operations.finish(signal);
+      setProjectBusy(operations.busy);
+    }
+  }, [operations, playerExportService]);
 
   const openSession = useCallback(async () => {
     if (!isTauriRuntime()) {
@@ -501,6 +548,7 @@ export default function App() {
         onImport={() => void chooseFile()}
         onOpenSession={() => void openSession()}
         onSaveSession={() => void saveSession()}
+        onExportForIphone={() => void exportForIphone()}
         onQualityChange={setQuality}
       />
       {state.status === "empty" ? (

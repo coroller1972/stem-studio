@@ -19,11 +19,33 @@ from audio_io import (
 from domain import ProgressReporter, STEM_NAMES, StemName, StemResult
 from errors import SeparationError
 from project_files import prepare_project, write_result_metadata
-from runtime import preferred_torch_device, run_with_heartbeat
+from runtime import device_override, preferred_torch_device, run_with_heartbeat
 
 BS_ROFORMER_MUSDB18HQ = "roformer-model-bs-roformer-musdb18hq-by-zfturbo"
 SessionFactory = Callable[..., Any]
 DeviceSelector = Callable[[], str]
+# Seconds of CPU inference per second of audio on an Apple M4, measured in
+# November 2026; the progress estimate assumes a slightly slower machine.
+EXPECTED_SECONDS_PER_AUDIO_SECOND = 2.2
+
+
+def bs_roformer_device() -> str:
+    """The preferred accelerator, except Apple's GPU, which this model overflows.
+
+    The model's configuration cuts audio into 11 s chunks. On Apple Silicon the
+    GPU shares unified memory with the system, and its attention kernel builds
+    each full attention matrix (about 2.2 GB per call for an 11 s chunk). On a
+    16 GB Mac under macOS 27.2 with PyTorch 2.8 that pushes the machine into
+    swap: 10 s of audio took 90 s on MPS but 18 s on the CPU, whose kernel works
+    in blocks. With 8 s chunks the GPU was slightly faster than the CPU (Apple
+    M4, November 2026). CUDA is unaffected. STEM_STUDIO_TORCH_DEVICE=mps
+    re-enables the Apple GPU to measure again after a PyTorch or macOS update.
+    """
+    override = device_override()
+    if override:
+        return override
+    device = preferred_torch_device()
+    return "cpu" if device == "mps" else device
 
 
 class BSRoFormerSeparator:
@@ -42,7 +64,7 @@ class BSRoFormerSeparator:
         self.model_id = model_id
         self.profile_id = profile_id
         self._audio_io = audio_io or FfmpegAudioIO()
-        self._device_selector = device_selector or preferred_torch_device
+        self._device_selector = device_selector or bs_roformer_device
         self._session_factory = session_factory or create_session
         self._models_dir = models_dir
 
@@ -70,6 +92,7 @@ class BSRoFormerSeparator:
 
         selected_device = self._device_selector()
         progress.report(0.08, f"Loading high-quality model on {selected_device.upper()}")
+        expected_seconds = EXPECTED_SECONDS_PER_AUDIO_SECOND * waveform.shape[-1] / 44_100
         final_device = selected_device
         warnings: tuple[str, ...] = ()
 
@@ -93,6 +116,7 @@ class BSRoFormerSeparator:
                     progress,
                     start=0.12,
                     end=0.82,
+                    expected_seconds=expected_seconds,
                 )
             except SeparationError:
                 raise
@@ -111,6 +135,7 @@ class BSRoFormerSeparator:
                         progress,
                         start=0.16,
                         end=0.82,
+                        expected_seconds=expected_seconds,
                     )
                 except SeparationError:
                     raise
@@ -143,6 +168,7 @@ class BSRoFormerSeparator:
         *,
         start: float,
         end: float,
+        expected_seconds: float = 225.0,
     ) -> Any:
         def operation() -> Any:
             session = self._session_factory(
@@ -172,6 +198,7 @@ class BSRoFormerSeparator:
             end,
             thread_name="bs-roformer",
             message="Running high-quality separation",
+            time_constant_seconds=expected_seconds / 3,
         )
 
 

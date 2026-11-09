@@ -245,4 +245,10 @@ def _create_bass_transcriber(engine_id: str, models_dir: Path | None):
 
 
 if __name__ == "__main__":
+    # The packaged engine is a PyInstaller executable: helper processes such as
+    # multiprocessing's resource tracker re-run it with their own arguments, which
+    # freeze_support() handles before the CLI parser rejects them.
+    import multiprocessing
+
+    multiprocessing.freeze_support()
     raise SystemExit(run())

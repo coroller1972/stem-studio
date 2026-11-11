@@ -23,7 +23,12 @@ class LibrosaBeatTracker:
 
         try:
             audio, sample_rate = librosa.load(str(audio_path), sr=22_050, mono=True)
-            onset_envelope = librosa.onset.onset_strength(y=audio, sr=sample_rate)
+            # Track the percussive part of the mix only: sustained vocals,
+            # guitars and synths add onsets on other metric levels, and on
+            # some songs they win over the drums' pulse (a 159 BPM song was
+            # read at 108 BPM, two thirds of the tempo).
+            percussive = librosa.effects.percussive(audio)
+            onset_envelope = librosa.onset.onset_strength(y=percussive, sr=sample_rate)
             tempo, beat_frames = librosa.beat.beat_track(
                 onset_envelope=onset_envelope,
                 sr=sample_rate,

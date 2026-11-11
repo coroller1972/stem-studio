@@ -28,7 +28,8 @@ PACKAGE_FORMAT = "stem-studio-player"
 PACKAGE_VERSION = 1
 MIX_KEYS = ("startMarkerSeconds", "masterVolume", "tracks")
 TEMPO_CACHE_NAME = "tempo.json"
-TEMPO_CACHE_VERSION = 1
+# Bump when the beat tracker changes, so cached tempos are detected again.
+TEMPO_CACHE_VERSION = 2
 
 Progress = Callable[[float, str], None]
 Converter = Callable[[Path, Path], None]

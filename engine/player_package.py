@@ -7,7 +7,8 @@ read each stem in place without inflating the archive.
 
 Tempo comes, in order, from a manual tempo, from the most recently updated
 bass or drums transcription (which includes any tempo corrected in Stem
-Studio), or from the beat tracker run on the four stems.
+Studio), or from the beat tracker run on the four stems. The tracker's result
+is cached in the project as tempo.json, which Stem Studio's metronome shares.
 """
 
 from __future__ import annotations
@@ -26,6 +27,8 @@ STEMS = ("vocals", "drums", "bass", "other")
 PACKAGE_FORMAT = "stem-studio-player"
 PACKAGE_VERSION = 1
 MIX_KEYS = ("startMarkerSeconds", "masterVolume", "tracks")
+TEMPO_CACHE_NAME = "tempo.json"
+TEMPO_CACHE_VERSION = 1
 
 Progress = Callable[[float, str], None]
 Converter = Callable[[Path, Path], None]
@@ -155,12 +158,63 @@ def choose_tempo(
 
     progress(0.1, "Detecting the tempo")
     try:
-        tempo_map = tracker(project)
+        tempo = detected_tempo(project, tracker)
     except Exception:  # The package stays useful without a metronome.
         return None
-    if not valid_tempo_map(tempo_map):
+    if tempo is None:
         return None
-    return tempo_payload(tempo_map["bpm"], beats_per_bar or 4, tempo_map["beats"], "beat tracker")
+    return {**tempo, "beatsPerBar": beats_per_bar or tempo["beatsPerBar"]}
+
+
+def detected_tempo(project: Path, tracker: TempoTracker | None = None) -> dict[str, object] | None:
+    """The beat tracker's tempo for the project's four stems, or None when it finds none.
+
+    The result, a miss included, is kept in tempo.json next to the stems, so
+    the desktop metronome and later exports reuse it instead of re-running the
+    tracker. A failure raises and caches nothing.
+    """
+    fingerprint = stems_fingerprint(project)
+    cached = read_tempo_cache(project / TEMPO_CACHE_NAME, fingerprint)
+    if cached is not None:
+        return cached["tempo"]  # type: ignore[return-value]
+    tempo_map = (tracker or track_tempo)(project)
+    tempo = (
+        tempo_payload(tempo_map["bpm"], 4, tempo_map["beats"], "beat tracker")  # type: ignore[index]
+        if valid_tempo_map(tempo_map)
+        else None
+    )
+    write_tempo_cache(project / TEMPO_CACHE_NAME, {"version": TEMPO_CACHE_VERSION, "stems": fingerprint, "tempo": tempo})
+    return tempo
+
+
+def stems_fingerprint(project: Path) -> dict[str, int]:
+    """Stem sizes: enough to tell another separation apart, and unchanged by copying a session."""
+    sizes: dict[str, int] = {}
+    for stem in STEMS:
+        path = project / f"{stem}.wav"
+        if not path.is_file():
+            raise PlayerExportError(f"The {stem} stem could not be found.")
+        sizes[stem] = path.stat().st_size
+    return sizes
+
+
+def read_tempo_cache(path: Path, fingerprint: Mapping[str, int]) -> Mapping[str, object] | None:
+    cache = read_json(path)
+    if not isinstance(cache, Mapping) or cache.get("version") != TEMPO_CACHE_VERSION or cache.get("stems") != fingerprint:
+        return None
+    tempo = cache.get("tempo")
+    if tempo is not None and not (valid_tempo_map(tempo) and isinstance(tempo, Mapping) and isinstance(tempo.get("beatsPerBar"), int)):
+        return None
+    return cache
+
+
+def write_tempo_cache(path: Path, cache: Mapping[str, object]) -> None:
+    partial = path.with_name(f".{path.name}.partial")
+    try:
+        partial.write_text(json.dumps(cache), encoding="utf-8")
+        os.replace(partial, path)
+    except OSError:  # A read-only project simply detects the tempo again next time.
+        partial.unlink(missing_ok=True)
 
 
 def track_tempo(project: Path) -> Mapping[str, object]:

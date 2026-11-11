@@ -1,16 +1,6 @@
-export interface MetronomeSettings {
-  countInBars: number;
-  songClicks: boolean;
-  volume: number;
-}
+import { COUNT_IN_CHOICES, type MetronomeSettings } from "../domain/metronomeSettings";
 
-export const DEFAULT_METRONOME_SETTINGS: MetronomeSettings = { countInBars: 1, songClicks: false, volume: 0.8 };
-const COUNT_IN_CHOICES = [
-  { bars: 0, label: "Off" },
-  { bars: 1, label: "1 bar" },
-  { bars: 2, label: "2 bars" },
-];
-const STORAGE_KEY = "stem-player.metronome";
+export const PLAYER_METRONOME_STORAGE_KEY = "stem-player.metronome";
 
 /** Always on screen while a song with a tempo is loaded: set it up just before playing. */
 export function MetronomePanel({ settings, onChange }: {
@@ -60,31 +50,4 @@ export function MetronomePanel({ settings, onChange }: {
       </div>
     </section>
   );
-}
-
-/** Remembered per phone; private browsing or blocked storage falls back to the defaults. */
-export function loadMetronomeSettings(): MetronomeSettings {
-  try {
-    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "null") as Partial<MetronomeSettings> | null;
-    if (!saved) return DEFAULT_METRONOME_SETTINGS;
-    return {
-      countInBars: COUNT_IN_CHOICES.some((choice) => choice.bars === saved.countInBars)
-        ? saved.countInBars!
-        : DEFAULT_METRONOME_SETTINGS.countInBars,
-      songClicks: saved.songClicks === true,
-      volume: typeof saved.volume === "number" && saved.volume >= 0 && saved.volume <= 1
-        ? saved.volume
-        : DEFAULT_METRONOME_SETTINGS.volume,
-    };
-  } catch {
-    return DEFAULT_METRONOME_SETTINGS;
-  }
-}
-
-export function saveMetronomeSettings(settings: MetronomeSettings): void {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
-  } catch {
-    // Settings simply reset next time.
-  }
 }

@@ -1,5 +1,5 @@
-import type { PlaybackClock, PlaybackListener } from "../audio/AudioEngine";
-import { countIn, songClicks, type MetronomeClick, type MetronomeGrid } from "./metronome";
+import type { PlaybackClock, PlaybackListener } from "./AudioEngine";
+import { countIn, songClicks, type MetronomeClick, type MetronomeGrid } from "../domain/metronome";
 
 const CLICK_SECONDS = 0.05;
 
@@ -18,9 +18,21 @@ export class ClickTrack implements PlaybackListener {
   private songGain: GainNode | null = null;
   private sounds: { accent: AudioBuffer; beat: AudioBuffer } | null = null;
   private scheduled: AudioBufferSourceNode[] = [];
+  /** The playback run in progress, if any. */
+  private clock: PlaybackClock | null = null;
 
+  /**
+   * Changes the beats to follow. Mid-playback, the song's remaining clicks are
+   * rescheduled on the new grid; a count-in already under way is not, since
+   * the stems' start was fixed by the old one.
+   */
   setGrid(grid: MetronomeGrid | null): void {
+    if (grid === this.grid) return;
     this.grid = grid;
+    const clock = this.clock;
+    if (!clock) return;
+    this.cancelScheduled();
+    this.scheduleRun(clock, false);
   }
 
   setCountInBars(bars: number): void {
@@ -44,13 +56,23 @@ export class ClickTrack implements PlaybackListener {
     return countIn(this.grid, startSeconds, this.countInBars).leadInSeconds;
   }
 
-  start({ context, startAt, offsetSeconds, leadInSeconds, duration }: PlaybackClock): void {
+  start(clock: PlaybackClock): void {
     this.stop();
+    this.clock = clock;
+    this.scheduleRun(clock, true);
+  }
+
+  stop(): void {
+    this.clock = null;
+    this.cancelScheduled();
+  }
+
+  private scheduleRun({ context, startAt, offsetSeconds, leadInSeconds, duration }: PlaybackClock, withCountIn: boolean): void {
     const grid = this.grid;
     if (!grid) return;
     this.connect(context);
     const toContextTime = (songTime: number) => startAt + songTime - offsetSeconds;
-    if (leadInSeconds > 0 && this.countInBars > 0) {
+    if (withCountIn && leadInSeconds > 0 && this.countInBars > 0) {
       for (const click of countIn(grid, offsetSeconds, this.countInBars).clicks) {
         this.schedule(click, toContextTime(click.time), this.output!);
       }
@@ -60,7 +82,7 @@ export class ClickTrack implements PlaybackListener {
     }
   }
 
-  stop(): void {
+  private cancelScheduled(): void {
     for (const node of this.scheduled) {
       try {
         node.stop();

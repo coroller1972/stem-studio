@@ -12,14 +12,21 @@ import {
 } from "../domain/metronomeTempo";
 import { formatTime } from "../domain/transport";
 
-const SOURCE_LABELS: Record<TempoSourceId, string> = { drums: "Drums", bass: "Bass", manual: "Manual" };
-const SOURCE_ORDER: readonly TempoSourceId[] = ["drums", "bass", "manual"];
+const SOURCE_LABELS: Record<TempoSourceId, string> = { drums: "Drums", bass: "Bass", detected: "Auto", manual: "Manual" };
+const SOURCE_ORDER: readonly TempoSourceId[] = ["drums", "bass", "detected", "manual"];
+
+export interface TempoDetectionStatus {
+  status: "detecting" | "done" | "error";
+  message: string | null;
+}
 const BEATS_PER_BAR_CHOICES = [2, 3, 4, 5, 6, 7, 9, 12];
 
 interface MetronomeControlsProps {
   settings: MetronomeSettings;
   onSettingsChange: (settings: MetronomeSettings) => void;
   choice: TempoChoice;
+  /** The engine's beat tracking for this song; null outside the desktop app. */
+  detection: TempoDetectionStatus | null;
   /** The detected or manual tempo actually followed, once the beats are smoothed. */
   bpm: number | null;
   onSourceChange: (source: TempoSourceId) => void;
@@ -36,6 +43,7 @@ export function MetronomeControls({
   settings,
   onSettingsChange,
   choice,
+  detection,
   bpm,
   onSourceChange,
   manual,
@@ -88,6 +96,13 @@ export function MetronomeControls({
   };
 
   const tempo = choice.tempo;
+  const detecting = detection?.status === "detecting";
+  const unavailableTitle = (source: TempoSourceId) => {
+    if (source !== "detected") return `Transcribe the ${source} to follow its beats`;
+    if (detecting) return "Detecting the tempo…";
+    if (detection?.status === "error") return detection.message ?? "The tempo detection failed";
+    return "No steady tempo was found in this song";
+  };
   const countInLabel = settings.countInBars > 0 ? `${settings.countInBars}-bar count-in` : "No count-in";
   return (
     <div className="metronome-control" ref={rootRef}>
@@ -110,7 +125,7 @@ export function MetronomeControls({
         title={tempo ? `Metronome: ${tempo.source}, ${countInLabel.toLowerCase()}` : "Metronome settings"}
         onClick={() => setOpen((value) => !value)}
       >
-        <strong>{bpm === null ? "—" : formatBpm(bpm)}</strong>
+        <strong>{bpm !== null ? formatBpm(bpm) : detecting ? "…" : "—"}</strong>
         <span>BPM</span>
         {tempo ? <em>{tempo.beatsPerBar}/bar</em> : null}
         {tempo && settings.countInBars > 0 ? <em className="metronome-count-in">+{settings.countInBars}</em> : null}
@@ -129,7 +144,7 @@ export function MetronomeControls({
                     type="button"
                     aria-pressed={choice.source === source}
                     disabled={!available}
-                    title={available ? undefined : `Transcribe the ${source} to follow its beats`}
+                    title={available ? undefined : unavailableTitle(source)}
                     onClick={() => onSourceChange(source)}
                   >
                     {SOURCE_LABELS[source]}
@@ -190,6 +205,11 @@ export function MetronomeControls({
                 </div>
               </div>
             </>
+          ) : tempo && choice.source === "detected" ? (
+            <p className="metronome-note">
+              Beats detected on the four stems, as for the iPhone export, {tempo.beatsPerBar} per bar. A drums or
+              bass transcription takes over, with its own tempo corrections.
+            </p>
           ) : tempo ? (
             <p className="metronome-note">
               Follows the beats of the {tempo.source}, {tempo.beatsPerBar} per bar. Correct its tempo in the{" "}
@@ -245,7 +265,13 @@ export function MetronomeControls({
           </div>
           {!tempo ? (
             <p className="metronome-note">
-              No transcription tempo yet: type or tap the BPM, or transcribe the drums or bass.
+              {detecting
+                ? "Detecting the tempo of the four stems…"
+                : detection?.status === "error"
+                  ? `Tempo detection failed: ${detection.message ?? "unknown error"}. Type or tap the BPM.`
+                  : detection
+                    ? "No steady tempo was found: type or tap the BPM."
+                    : "No tempo yet: type or tap the BPM, or transcribe the drums or bass."}
             </p>
           ) : null}
         </div>

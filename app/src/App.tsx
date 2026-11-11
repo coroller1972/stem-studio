@@ -35,11 +35,12 @@ import type {
 import { resolveTransportKeyboardShortcut } from "./domain/keyboardShortcuts";
 import { buildMetronomeGrid } from "./domain/metronome";
 import { loadMetronomeSettings, saveMetronomeSettings, type MetronomeSettings } from "./domain/metronomeSettings";
-import { chooseTempo, type ManualTempoInput, type TempoSourceId } from "./domain/metronomeTempo";
+import { chooseTempo, type ManualTempoInput, type MetronomeTempo, type TempoSourceId } from "./domain/metronomeTempo";
 import { isTauriRuntime, TauriSeparationService } from "./services/separationService";
 import { TauriSessionService } from "./services/sessionService";
 import { describePlayerPackage, TauriPlayerExportService } from "./services/playerExportService";
 import { TauriTranscriptionService } from "./services/transcriptionService";
+import { TauriTempoService } from "./services/tempoService";
 import { useProjectStore } from "./state/projectStore";
 import { ProjectOperations } from "./services/projectOperations";
 
@@ -55,6 +56,7 @@ export default function App() {
   const sessionService = useMemo(() => new TauriSessionService(), []);
   const playerExportService = useMemo(() => new TauriPlayerExportService(), []);
   const transcriptionService = useMemo(() => new TauriTranscriptionService(), []);
+  const tempoService = useMemo(() => new TauriTempoService(), []);
   const clickTrackRef = useRef<ClickTrack | null>(null);
   clickTrackRef.current ??= new ClickTrack();
   const clickTrack = clickTrackRef.current;
@@ -133,9 +135,18 @@ export default function App() {
   const [manualTempo, setManualTempo] = useState<ManualTempoInput>(DEFAULT_MANUAL_TEMPO);
   const drumsTempoMap = useProjectStore((store) => store.transcriptions.drums.result?.transcription.tempoMap ?? null);
   const bassTempoMap = useProjectStore((store) => store.transcriptions.bass.result?.transcription.tempoMap ?? null);
+  const [tempoDetection, setTempoDetection] = useState<TempoDetection | null>(null);
+  const detection = tempoDetection?.projectPath === state.projectPath ? tempoDetection : null;
+  const detectedTempo = detection?.tempo ?? null;
   const tempoChoice = useMemo(
-    () => chooseTempo(tempoSource, { drums: drumsTempoMap, bass: bassTempoMap }, manualTempo, state.duration),
-    [tempoSource, drumsTempoMap, bassTempoMap, manualTempo, state.duration],
+    () => chooseTempo(
+      tempoSource,
+      { drums: drumsTempoMap, bass: bassTempoMap },
+      detectedTempo,
+      manualTempo,
+      state.duration,
+    ),
+    [tempoSource, drumsTempoMap, bassTempoMap, detectedTempo, manualTempo, state.duration],
   );
   const metronomeGrid = useMemo(
     () => (tempoChoice.tempo ? buildMetronomeGrid(tempoChoice.tempo.beats, tempoChoice.tempo.beatsPerBar) : null),
@@ -147,6 +158,27 @@ export default function App() {
     setTempoSource(null);
     setManualTempo(DEFAULT_MANUAL_TEMPO);
   }, [state.projectPath]);
+
+  // Detect the tempo as soon as a song is ready, like the iPhone export does.
+  useEffect(() => {
+    const projectPath = state.projectPath;
+    if (state.status !== "ready" || !projectPath || !isTauriRuntime()) return;
+    let current = true;
+    setTempoDetection({ projectPath, status: "detecting", tempo: null, message: null });
+    tempoService.detect(projectPath).then(
+      (tempo) => {
+        if (current) setTempoDetection({ projectPath, status: "done", tempo, message: null });
+      },
+      (error: unknown) => {
+        if (!current) return;
+        const message = error instanceof Error ? error.message : String(error);
+        setTempoDetection({ projectPath, status: "error", tempo: null, message });
+      },
+    );
+    return () => {
+      current = false;
+    };
+  }, [state.status, state.projectPath, tempoService]);
 
   useEffect(() => clickTrack.setGrid(metronomeGrid), [clickTrack, metronomeGrid]);
 
@@ -691,6 +723,7 @@ export default function App() {
                 settings={metronome}
                 onSettingsChange={setMetronome}
                 choice={tempoChoice}
+                detection={detection ? { status: detection.status, message: detection.message } : null}
                 bpm={metronomeGrid?.bpm ?? null}
                 onSourceChange={setTempoSource}
                 manual={manualTempo}
@@ -713,6 +746,13 @@ export default function App() {
       ) : null}
     </div>
   );
+}
+
+interface TempoDetection {
+  projectPath: string;
+  status: "detecting" | "done" | "error";
+  tempo: MetronomeTempo | null;
+  message: string | null;
 }
 
 interface SessionFeedback {

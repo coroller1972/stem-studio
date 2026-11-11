@@ -12,6 +12,8 @@ use uuid::Uuid;
 
 const SESSION_SCHEMA_VERSION: u32 = 2;
 const SESSION_MANIFEST_NAME: &str = "session.json";
+/// The beat tracker's result, cached next to the stems by the engine (`track-tempo`).
+const TEMPO_CACHE_NAME: &str = "tempo.json";
 const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
 const MAX_TRANSCRIPTION_JSON_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_CACHED_PROJECTS: usize = 5;
@@ -42,6 +44,13 @@ impl RunnerState {
         *self.cancel_sender.lock().await = None;
         result
     }
+}
+
+/// Tempo detection runs beside the exclusive engine slot, so it never blocks a
+/// transcription or an export; a new request cancels the previous one.
+#[derive(Default)]
+struct TempoRunnerState {
+    cancel_sender: Mutex<Option<watch::Sender<bool>>>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -664,6 +673,106 @@ async fn export_player_package(
         .await
 }
 
+/// The beats of the project's four stems for the desktop metronome, or None
+/// when the song has no steady tempo. The engine caches the answer in the
+/// project, so only the first request for a song runs the beat tracker.
+#[tauri::command]
+async fn detect_tempo(
+    app: AppHandle,
+    state: State<'_, TempoRunnerState>,
+    project_path: String,
+) -> Result<Option<Value>, String> {
+    let project = PathBuf::from(project_path);
+    if !project.is_dir() {
+        return Err("The current stem project could not be found.".into());
+    }
+    let (cancel_sender, mut cancel_receiver) = watch::channel(false);
+    if let Some(previous) = state.cancel_sender.lock().await.replace(cancel_sender) {
+        let _ = previous.send(true);
+    }
+    run_tempo_tracking(&app, &project, &mut cancel_receiver).await
+}
+
+async fn run_tempo_tracking(
+    app: &AppHandle,
+    project: &Path,
+    cancel: &mut watch::Receiver<bool>,
+) -> Result<Option<Value>, String> {
+    let (program, prefix_args) = resolve_engine_command(app)?;
+    let mut child = Command::new(program)
+        .args(prefix_args)
+        .arg("track-tempo")
+        .arg(project)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|error| format!("Unable to start the tempo detection: {error}"))?;
+    let stdout = child.stdout.take().ok_or("Unable to read engine output.")?;
+    let mut stderr = child.stderr.take().ok_or("Unable to read engine logs.")?;
+    let stdout_task = tauri::async_runtime::spawn(async move {
+        let mut lines = BufReader::new(stdout).lines();
+        let mut completed = None;
+        let mut error_message = None;
+        while let Some(line) = lines.next_line().await.map_err(|error| error.to_string())? {
+            let Ok(mut value) = serde_json::from_str::<Value>(&line) else {
+                continue;
+            };
+            match value.get("type").and_then(Value::as_str) {
+                Some("tempo_completed") => {
+                    completed = Some(
+                        value
+                            .get_mut("result")
+                            .map(Value::take)
+                            .unwrap_or(Value::Null),
+                    );
+                }
+                Some("tempo_error") => {
+                    error_message = serde_json::from_value::<ErrorEvent>(value)
+                        .ok()
+                        .map(|event| event.message);
+                }
+                _ => {}
+            }
+        }
+        Ok::<_, String>((completed, error_message))
+    });
+    let stderr_task = tauri::async_runtime::spawn(async move {
+        let mut logs = String::new();
+        stderr
+            .read_to_string(&mut logs)
+            .await
+            .map_err(|error| error.to_string())?;
+        Ok::<String, String>(logs)
+    });
+    let status = tokio::select! {
+        status = child.wait() => status.map_err(|error| error.to_string())?,
+        changed = cancel.changed() => {
+            if changed.is_ok() && *cancel.borrow() {
+                let _ = child.start_kill();
+                let _ = child.wait().await;
+                return Err("The tempo detection was cancelled.".into());
+            }
+            child.wait().await.map_err(|error| error.to_string())?
+        }
+    };
+    let (completed, error_message) = stdout_task.await.map_err(|error| error.to_string())??;
+    let logs = stderr_task.await.map_err(|error| error.to_string())??;
+    if !logs.is_empty() {
+        eprintln!("stem-engine tempo: {logs}");
+    }
+    if !status.success() {
+        return Err(
+            error_message.unwrap_or_else(|| "The tempo detection stopped unexpectedly.".into())
+        );
+    }
+    match completed {
+        Some(Value::Null) => Ok(None),
+        Some(tempo) => Ok(Some(tempo)),
+        None => Err("The engine did not return a tempo.".into()),
+    }
+}
+
 /// The player package is a single .zip written into an existing folder.
 fn validate_player_destination(destination: &Path) -> Result<PathBuf, String> {
     let is_zip = destination
@@ -1124,6 +1233,11 @@ fn save_session_files(
 
         let engine_metadata = read_optional_metadata(&project_path.join("source.json"));
         let transcriptions = copy_session_transcriptions(project_path, &temporary_path)?;
+        // The tempo cache only saves a few seconds of beat tracking: copy it when possible.
+        let tempo_cache = project_path.join(TEMPO_CACHE_NAME);
+        if tempo_cache.is_file() {
+            let _ = fs::copy(&tempo_cache, temporary_path.join(TEMPO_CACHE_NAME));
+        }
         let manifest = SessionManifest {
             schema_version: SESSION_SCHEMA_VERSION,
             saved_at_unix_seconds: SystemTime::now()
@@ -1727,6 +1841,7 @@ mod session_tests {
             r#"{"sourcePath":"/private/song.mp3","model":"test-model"}"#,
         )
         .unwrap();
+        fs::write(project.join(TEMPO_CACHE_NAME), br#"{"version":1}"#).unwrap();
 
         let session_path = destination.join("My Song.stemstudio");
         let saved = save_session_files(
@@ -1759,6 +1874,9 @@ mod session_tests {
             "transcription/bass.json"
         );
         assert!(manifest["engineMetadata"].get("sourcePath").is_none());
+        assert!(Path::new(&saved.session_path)
+            .join(TEMPO_CACHE_NAME)
+            .is_file());
 
         fs::remove_dir_all(root).unwrap();
     }
@@ -1917,6 +2035,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .manage(RunnerState::default())
+        .manage(TempoRunnerState::default())
         .invoke_handler(tauri::generate_handler![
             separate_audio,
             cancel_separation,
@@ -1924,6 +2043,7 @@ pub fn run() {
             requantize_transcription,
             export_transcription_file,
             export_player_package,
+            detect_tempo,
             save_session,
             load_session
         ])

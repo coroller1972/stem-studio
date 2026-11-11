@@ -13,7 +13,7 @@ from typing import Any
 from domain import CallbackProgressReporter
 from errors import SeparationError, TranscriptionError
 from factory import create_separator
-from player_package import ManualTempo, PlayerExportError, export_player_package
+from player_package import ManualTempo, PlayerExportError, detected_tempo, export_player_package
 from registry import DEFAULT_PROFILE_ID, PROFILE_REGISTRY, get_profile
 from transcription_domain import TranscriptionProgressReporter
 from transcription_pipeline import TranscriptionEngine
@@ -80,12 +80,19 @@ def build_parser() -> argparse.ArgumentParser:
     export.add_argument("--downbeat", type=float, default=0.0, help="With --bpm: time of a bar's first beat")
     export.add_argument("--beats-per-bar", type=int)
     export.add_argument("--no-tempo", action="store_true", help="Leave the metronome out")
+    tempo = subparsers.add_parser("track-tempo", help="Detect the beats of a stem project for the metronome")
+    tempo.add_argument("project", type=Path, help="Folder holding vocals.wav, drums.wav, bass.wav and other.wav")
     return parser
 
 
 def run(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
+        if args.command == "track-tempo":
+            emit({"type": "tempo_progress", "progress": 0.0, "message": "Detecting the tempo"})
+            emit({"type": "tempo_completed", "result": detected_tempo(args.project)})
+            return 0
+
         if args.command == "export-player":
             mix = json.loads(args.mix) if args.mix else None
             if mix is not None and not isinstance(mix, dict):
@@ -192,10 +199,10 @@ def run(argv: list[str] | None = None) -> int:
         emit({"type": "completed", "stems": result.stems_payload()})
         return 0
     except PlayerExportError as error:
-        emit({"type": "export_error", "message": error.user_message, "detail": str(error)})
+        emit({"type": _error_event_type(args.command), "message": error.user_message, "detail": str(error)})
         return 1
     except TranscriptionError as error:
-        emit({"type": "transcription_error", "message": error.user_message, "detail": str(error)})
+        emit({"type": _error_event_type(args.command), "message": error.user_message, "detail": str(error)})
         return 1
     except SeparationError as error:
         emit({"type": "error", "message": error.user_message, "detail": str(error)})
@@ -207,6 +214,8 @@ def run(argv: list[str] | None = None) -> int:
         traceback.print_exc(file=sys.stderr)
         if args.command == "export-player":
             message = "Unable to export the iPhone package."
+        elif args.command == "track-tempo":
+            message = "Unable to detect the tempo."
         elif _is_transcription_command(args.command):
             message = "Transcription failed."
         else:
@@ -225,6 +234,8 @@ def _models_dir_from_environment() -> Path | None:
 def _error_event_type(command: str) -> str:
     if command == "export-player":
         return "export_error"
+    if command == "track-tempo":
+        return "tempo_error"
     return "transcription_error" if _is_transcription_command(command) else "error"
 
 

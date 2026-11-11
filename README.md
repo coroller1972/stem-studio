@@ -297,7 +297,8 @@ contient les quatre stems en AAC (quelques Mo chacun, convertis par `afconvert`)
 compression pour que le téléphone les lise en place, et un `player.json` avec le mix, le marqueur
 et la grille de temps du métronome. Le tempo vient de `--bpm` (avec `--downbeat`, script seulement),
 sinon de la transcription basse ou batterie la plus récente (y compris un tempo corrigé dans
-l'éditeur de transcription), sinon du beat tracker du moteur (une dizaine de secondes).
+l'éditeur de transcription), sinon du beat tracker du moteur (quelques secondes, puis mis en cache
+dans `tempo.json`, partagé avec le métronome du studio).
 
 Côté lecteur, le métronome propose un décompte d'une ou deux mesures calé sur la grille du morceau
 et un clic pendant la lecture. Les battements détectés sont lissés (médianes puis moindres carrés
@@ -319,8 +320,9 @@ sur les mesures du morceau), `app/src/domain/metronomeTempo.ts` choisit le tempo
 Dans la barre de transport, le bouton chronomètre active le clic pendant la lecture et l'affichage
 du tempo ouvre les réglages :
 
-- **Tempo** : la grille de temps de la transcription batterie, sinon basse (y compris un tempo
-  corrigé dans l'onglet de transcription), ou **Manual**. En manuel, saisir le BPM ou le taper
+- **Tempo** : comme pour l'export iPhone, la grille de temps de la transcription batterie, sinon
+  basse (y compris un tempo corrigé dans l'onglet de transcription), sinon **Auto**, le beat
+  tracker du moteur lancé automatiquement à l'ouverture du morceau, ou **Manual**. En manuel, saisir le BPM ou le taper
   (**Tap**) ; taper pendant la lecture en commençant sur un premier temps place aussi la mesure.
   **Bar 1 · At playhead** cale un premier temps de mesure sur la tête de lecture. Le marqueur
   START reste libre : il peut tomber au milieu d'une mesure sans décaler la grille.
@@ -329,8 +331,11 @@ du tempo ouvre les réglages :
 - **Click** : clic pendant le morceau (temps fort accentué) et son volume, indépendant du volume
   master.
 
-Sans transcription, le desktop n'a pas de carte de tempo : il faut saisir ou taper le BPM, ou
-transcrire la batterie. Le tempo manuel vaut pour le morceau ouvert et n'est pas enregistré dans
+La détection (commande `track-tempo` du moteur, `detect_tempo` côté Tauri) tourne sur les quatre
+stems en quelques secondes, à côté des autres opérations du moteur sans les bloquer. Son résultat
+est mis en cache dans le projet (`tempo.json`, copié avec la session) : les ouvertures suivantes et
+l'export iPhone le réutilisent sans relancer le beat tracker. Si aucun tempo stable n'est trouvé,
+saisir ou taper le BPM. Le tempo manuel vaut pour le morceau ouvert et n'est pas enregistré dans
 la session ; les réglages de décompte et de clic sont mémorisés localement.
 
 Les clics de tout le morceau sont planifiés au lancement de chaque lecture, à

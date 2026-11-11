@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import main
 import player_package
-from player_package import ManualTempo, PlayerExportError, aac_command, export_player_package
+from player_package import ManualTempo, PlayerExportError, aac_command, detected_tempo, export_player_package
 
 MIX = {
     "currentTimeSeconds": 42.0,
@@ -122,6 +122,38 @@ class PlayerPackageTest(unittest.TestCase):
         self.assertEqual(package.tempo_source, "beat tracker")
         self.assertEqual(self.manifest()["tempo"]["beatsPerBar"], 4)
 
+    def test_caches_the_detected_tempo_for_the_metronome_and_later_exports(self) -> None:
+        beats = [{"beatIndex": index, "timeSeconds": index * 0.5} for index in range(8)]
+        calls: list[Path] = []
+
+        def tracker(project: Path):
+            calls.append(project)
+            return {"bpm": 120.0, "beats": beats}
+
+        tempo = detected_tempo(self.project, tracker)
+        self.assertEqual((tempo["bpm"], tempo["beatsPerBar"], tempo["source"]), (120.0, 4, "beat tracker"))
+        self.assertTrue((self.project / "tempo.json").is_file())
+        self.assertEqual(detected_tempo(self.project, tracker), tempo)
+        package = self.export(beats_per_bar=3)
+        self.assertEqual(package.tempo_source, "beat tracker")
+        self.assertEqual(self.manifest()["tempo"]["beatsPerBar"], 3)
+        self.assertEqual(len(calls), 1)
+
+        # Another separation (different stems) detects again.
+        write_wav(self.project / "drums.wav", 5.0)
+        detected_tempo(self.project, tracker)
+        self.assertEqual(len(calls), 2)
+
+    def test_caches_a_song_without_a_steady_tempo(self) -> None:
+        calls: list[Path] = []
+        tracker = lambda project: calls.append(project) or {"bpm": 0, "beats": []}
+        self.assertIsNone(detected_tempo(self.project, tracker))
+        self.assertIsNone(detected_tempo(self.project, tracker))
+        self.assertEqual(len(calls), 1)
+        (self.project / "tempo.json").write_text("{damaged")
+        self.assertIsNone(detected_tempo(self.project, tracker))
+        self.assertEqual(len(calls), 2)
+
     def test_a_failed_detection_leaves_the_metronome_out(self) -> None:
         def broken_tracker(_project: Path):
             raise RuntimeError("librosa missing")
@@ -129,6 +161,7 @@ class PlayerPackageTest(unittest.TestCase):
         package = self.export(tempo_tracker=broken_tracker)
         self.assertIsNone(package.tempo_bpm)
         self.assertNotIn("tempo", self.manifest())
+        self.assertFalse((self.project / "tempo.json").exists())
 
     def test_builds_a_steady_grid_from_a_manual_tempo(self) -> None:
         self.export(manual_tempo=ManualTempo(120.0, downbeat_seconds=1.25))
@@ -179,6 +212,27 @@ class ExportCliTest(unittest.TestCase):
         self.assertTrue(any(line["type"] == "export_progress" for line in lines))
         self.assertEqual(failed, 1)
         self.assertEqual(lines[-1]["type"], "export_error")
+
+
+class TrackTempoCliTest(unittest.TestCase):
+    def test_reports_the_detected_tempo_and_errors_as_tempo_events(self) -> None:
+        beats = [{"beatIndex": index, "timeSeconds": index * 0.5} for index in range(8)]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for stem in ("vocals", "drums", "bass", "other"):
+                write_wav(root / f"{stem}.wav", 1.0)
+            events = io.StringIO()
+            with patch.object(main, "_EVENT_STREAM", events), \
+                    patch("player_package.track_tempo", lambda _project: {"bpm": 120.0, "beats": beats}):
+                code = main.run(["track-tempo", str(root)])
+                failed = main.run(["track-tempo", str(root / "missing")])
+            lines = [json.loads(line) for line in events.getvalue().splitlines()]
+        self.assertEqual(code, 0)
+        completed = next(line for line in lines if line["type"] == "tempo_completed")
+        self.assertEqual(completed["result"]["bpm"], 120.0)
+        self.assertEqual(completed["result"]["beats"][2], {"beatIndex": 2, "timeSeconds": 1.0})
+        self.assertEqual(failed, 1)
+        self.assertEqual(lines[-1]["type"], "tempo_error")
 
 
 if __name__ == "__main__":

@@ -1,6 +1,6 @@
 import { clampVolume, createDefaultTracks } from "../domain/mixer";
-import type { MetronomeTempo } from "../domain/metronomeTempo";
-import { STEM_NAMES, type StemName, type StemState, type TempoBeat } from "../domain/types";
+import { parseMetronomeTempo, type MetronomeTempo } from "../domain/metronomeTempo";
+import { STEM_NAMES, type StemName, type StemState } from "../domain/types";
 
 /** Written by scripts/export_iphone_package.py. */
 export const PACKAGE_FORMAT = "stem-studio-player";
@@ -77,7 +77,7 @@ export function parseManifest(value: unknown): Omit<StemPackage, "stems"> & { st
     stemFiles: stems as Record<StemName, string>,
     // The mix and the tempo are conveniences: a damaged one is dropped, not fatal.
     mix: parseMix(manifest.state),
-    tempo: parseTempo(manifest.tempo),
+    tempo: parseMetronomeTempo(manifest.tempo, "package"),
   };
 }
 
@@ -100,22 +100,6 @@ function parseMix(value: unknown): PackageMix | null {
     masterVolume: isUnit(state.masterVolume) ? clampVolume(state.masterVolume) : null,
     tracks,
   };
-}
-
-function parseTempo(value: unknown): PlayerTempo | null {
-  const tempo = record(value);
-  if (!tempo || !isFiniteNumber(tempo.bpm) || tempo.bpm < 20 || tempo.bpm > 400 || !Array.isArray(tempo.beats)) return null;
-  const beats: TempoBeat[] = [];
-  for (const item of tempo.beats) {
-    const beat = record(item);
-    if (!beat || !Number.isInteger(beat.beatIndex) || !isFiniteNumber(beat.timeSeconds)) return null;
-    beats.push({ beatIndex: beat.beatIndex as number, timeSeconds: beat.timeSeconds });
-  }
-  if (beats.length < 2) return null;
-  const beatsPerBar = Number.isInteger(tempo.beatsPerBar) && (tempo.beatsPerBar as number) >= 1 && (tempo.beatsPerBar as number) <= 16
-    ? (tempo.beatsPerBar as number)
-    : 4;
-  return { bpm: tempo.bpm, beatsPerBar, beats, source: typeof tempo.source === "string" ? tempo.source : "package" };
 }
 
 /** Reads the central directory of a ZIP archive without loading its contents. */

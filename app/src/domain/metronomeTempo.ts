@@ -9,7 +9,8 @@ export interface MetronomeTempo {
   source: string;
 }
 
-export type TempoSourceId = TranscriptionTrack | "manual";
+/** "detected" is the engine's beat tracker, run on the four stems like for the iPhone export. */
+export type TempoSourceId = TranscriptionTrack | "detected" | "manual";
 
 export const MIN_BPM = 20;
 export const MAX_BPM = 400;
@@ -50,6 +51,32 @@ export function manualTempo(
   return { bpm, beatsPerBar, beats, source: "manual tempo" };
 }
 
+/**
+ * Reads a tempo written by the engine (`tempo_payload` in engine/player_package.py),
+ * from an iPhone package or the desktop's tempo detection. Damaged data gives null.
+ */
+export function parseMetronomeTempo(value: unknown, fallbackSource: string): MetronomeTempo | null {
+  const tempo = record(value);
+  if (!tempo || typeof tempo.bpm !== "number" || !isValidBpm(tempo.bpm) || !Array.isArray(tempo.beats)) return null;
+  const beats: TempoBeat[] = [];
+  for (const item of tempo.beats) {
+    const beat = record(item);
+    if (!beat || !Number.isInteger(beat.beatIndex) || typeof beat.timeSeconds !== "number" || !Number.isFinite(beat.timeSeconds)) {
+      return null;
+    }
+    beats.push({ beatIndex: beat.beatIndex as number, timeSeconds: beat.timeSeconds });
+  }
+  if (beats.length < 2) return null;
+  const beatsPerBar = typeof tempo.beatsPerBar === "number" && isValidBeatsPerBar(tempo.beatsPerBar)
+    ? tempo.beatsPerBar
+    : DEFAULT_BEATS_PER_BAR;
+  return { bpm: tempo.bpm, beatsPerBar, beats, source: typeof tempo.source === "string" ? tempo.source : fallbackSource };
+}
+
+function record(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+}
+
 /** The tempo of a transcription, with its time signature's numerator as the bar length. */
 export function tempoFromMap(tempoMap: TempoMap | null | undefined, source: string): MetronomeTempo | null {
   if (!tempoMap || !isValidBpm(tempoMap.bpm) || !Array.isArray(tempoMap.beats)) return null;
@@ -88,21 +115,27 @@ export function transcriptionTempoMaps(transcriptions: ProjectTranscriptions): T
 }
 
 /**
- * Picks the metronome's tempo: a transcription's beat map when one exists
- * (drums first, then bass), otherwise the manual tempo.
+ * Picks the metronome's tempo like the iPhone export: a transcription's beat
+ * map when one exists (drums first, then bass, including a corrected tempo),
+ * then the beat tracker's, otherwise the manual tempo.
  */
 export function chooseTempo(
   preferred: TempoSourceId | null,
   maps: TranscriptionTempoMaps,
+  detected: MetronomeTempo | null,
   manual: ManualTempoInput,
   durationSeconds: number,
 ): TempoChoice {
-  const tempos: Partial<Record<TranscriptionTrack, MetronomeTempo>> = {};
+  const tempos: Partial<Record<Exclude<TempoSourceId, "manual">, MetronomeTempo>> = {};
   for (const track of TRANSCRIPTION_SOURCES) {
     const tempo = tempoFromMap(maps[track], `${track} transcription`);
     if (tempo) tempos[track] = tempo;
   }
-  const available: TempoSourceId[] = [...TRANSCRIPTION_SOURCES.filter((track) => tempos[track]), "manual"];
+  if (detected) tempos.detected = detected;
+  const available: TempoSourceId[] = [
+    ...([...TRANSCRIPTION_SOURCES, "detected"] as const).filter((source) => tempos[source]),
+    "manual",
+  ];
   const source = preferred && available.includes(preferred) ? preferred : available[0]!;
   if (source !== "manual") return { source, tempo: tempos[source]!, available };
   const tempo = manual.bpm === null

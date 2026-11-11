@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { beatTime, buildMetronomeGrid, countIn, isDownbeat } from "./metronome";
-import { addTap, chooseTempo, manualTempo, tapTempo, tempoFromMap } from "./metronomeTempo";
+import { addTap, chooseTempo, manualTempo, parseMetronomeTempo, tapTempo, tempoFromMap } from "./metronomeTempo";
 import type { TempoMap } from "./types";
 
 const map = (bpm: number, numerator = 4, first = 0.5, count = 16): TempoMap => ({
@@ -55,21 +55,48 @@ describe("tempo source", () => {
   it("prefers the drums, then the bass, then the manual tempo", () => {
     const drums = map(120);
     const bass = map(121);
-    expect(chooseTempo(null, { drums, bass }, NO_MANUAL, 60)).toMatchObject({
+    expect(chooseTempo(null, { drums, bass }, null, NO_MANUAL, 60)).toMatchObject({
       source: "drums",
       tempo: { bpm: 120 },
       available: ["drums", "bass", "manual"],
     });
-    expect(chooseTempo(null, { bass }, NO_MANUAL, 60)).toMatchObject({ source: "bass", available: ["bass", "manual"] });
-    expect(chooseTempo(null, {}, NO_MANUAL, 60)).toEqual({ source: "manual", tempo: null, available: ["manual"] });
+    expect(chooseTempo(null, { bass }, null, NO_MANUAL, 60)).toMatchObject({ source: "bass", available: ["bass", "manual"] });
+    expect(chooseTempo(null, {}, null, NO_MANUAL, 60)).toEqual({ source: "manual", tempo: null, available: ["manual"] });
+  });
+
+  it("uses the beat tracker's tempo after the transcriptions, like the iPhone export", () => {
+    const detected = tempoFromMap(map(129.2), "beat tracker")!;
+    expect(chooseTempo(null, {}, detected, NO_MANUAL, 60)).toMatchObject({
+      source: "detected",
+      tempo: { bpm: 129.2, source: "beat tracker" },
+      available: ["detected", "manual"],
+    });
+    expect(chooseTempo(null, { bass: map(121) }, detected, NO_MANUAL, 60)).toMatchObject({
+      source: "bass",
+      available: ["bass", "detected", "manual"],
+    });
+    expect(chooseTempo("detected", { drums: map(120) }, detected, NO_MANUAL, 60).tempo!.bpm).toBe(129.2);
+    expect(chooseTempo("detected", {}, null, NO_MANUAL, 60).source).toBe("manual");
+  });
+
+  it("reads the engine's tempo payload and drops damaged ones", () => {
+    const payload = { bpm: 129.199, beatsPerBar: 3, beats: [{ beatIndex: 0, timeSeconds: 0.55 }, { beatIndex: 1, timeSeconds: 1.02 }] };
+    expect(parseMetronomeTempo(payload, "beat tracker")).toEqual({ ...payload, source: "beat tracker" });
+    expect(parseMetronomeTempo({ ...payload, source: "drums transcription", beatsPerBar: 40 }, "x")).toMatchObject({
+      beatsPerBar: 4,
+      source: "drums transcription",
+    });
+    expect(parseMetronomeTempo({ ...payload, bpm: 900 }, "x")).toBeNull();
+    expect(parseMetronomeTempo({ ...payload, beats: [{ beatIndex: 0.5, timeSeconds: 1 }, { beatIndex: 1, timeSeconds: 2 }] }, "x")).toBeNull();
+    expect(parseMetronomeTempo([], "x")).toBeNull();
   });
 
   it("follows the user's choice while that source exists", () => {
     const manual = { bpm: 90, beatsPerBar: 4, downbeatSeconds: 0 };
-    expect(chooseTempo("bass", { drums: map(120), bass: map(121) }, manual, 60).tempo!.bpm).toBe(121);
-    expect(chooseTempo("manual", { drums: map(120) }, manual, 60).tempo!.bpm).toBe(90);
+    expect(chooseTempo("bass", { drums: map(120), bass: map(121) }, null, manual, 60).tempo!.bpm).toBe(121);
+    expect(chooseTempo("manual", { drums: map(120) }, null, manual, 60).tempo!.bpm).toBe(90);
     // The bass transcription was cleared: fall back to what is left.
-    expect(chooseTempo("bass", { drums: map(120) }, manual, 60).source).toBe("drums");
+    expect(chooseTempo("bass", { drums: map(120) }, null, manual, 60).source).toBe("drums");
   });
 });
 

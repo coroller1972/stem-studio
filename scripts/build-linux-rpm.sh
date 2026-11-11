@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 # Build a local Fedora RPM: PyInstaller engine + Tauri release binary + rpmbuild.
+# Usage: scripts/build-linux-rpm.sh [--install]
+#   --install  install the new RPM with "sudo dnf install" once it is built.
 set -euo pipefail
+
+install_rpm=false
+for argument in "$@"; do
+  case "$argument" in
+    --install) install_rpm=true ;;
+    -h|--help) sed -n '2,4p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "Unknown option: $argument (see --help)" >&2; exit 1 ;;
+  esac
+done
 
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
 app_dir="$repo_dir/app"
@@ -36,6 +47,13 @@ if ! "$python" -c 'import onnxruntime' >/dev/null 2>&1; then
 fi
 
 version="$("$python" -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$app_dir/src-tauri/tauri.conf.json")"
+# The app version rarely changes between local builds, and dnf will not
+# reinstall a package with the same version-release. A release made of the
+# build time (and the commit) sorts after every earlier build, so dnf upgrades.
+release="1.$(date +%Y%m%d%H%M%S)"
+if commit="$(git -C "$repo_dir" rev-parse --short HEAD 2>/dev/null)"; then
+  release="$release.git$commit"
+fi
 
 echo "==> Packaging the engine with PyInstaller (several GB with CUDA)"
 (
@@ -64,9 +82,16 @@ echo "==> Building the RPM"
 rpmbuild -bb \
   --define "_topdir $rpm_topdir" \
   --define "app_version $version" \
+  --define "app_release $release" \
   "$repo_dir/packaging/linux/stem-studio.spec"
 
 rpm_path="$(find "$rpm_topdir/RPMS" -name 'stem-studio-*.rpm' | head -n 1)"
 echo
 echo "RPM: $rpm_path ($(du -h "$rpm_path" | cut -f1))"
-echo "Install with: sudo dnf install \"$rpm_path\""
+if [[ "$install_rpm" == true ]]; then
+  echo "==> Installing the RPM"
+  sudo dnf install -y "$rpm_path"
+  rpm -q stem-studio
+else
+  echo "Install with: sudo dnf install \"$rpm_path\""
+fi

@@ -332,8 +332,11 @@ du tempo ouvre les réglages :
   master.
 
 La détection (commande `track-tempo` du moteur, `detect_tempo` côté Tauri) tourne sur les quatre
-stems en quelques secondes, à côté des autres opérations du moteur sans les bloquer. Son résultat
-est mis en cache dans le projet (`tempo.json`, copié avec la session) : les ouvertures suivantes et
+stems en quelques secondes. Comme pour les transcriptions, le beat tracker n'écoute que la partie
+percussive du mix (séparation harmonique/percussive de librosa) : des voix ou des guitares tenues
+le faisaient parfois caler sur une autre pulsation, par exemple les deux tiers du tempo. La
+détection tourne à côté des autres opérations du moteur sans les bloquer. Son résultat est mis
+en cache dans le projet (`tempo.json`, copié avec la session) : les ouvertures suivantes et
 l'export iPhone le réutilisent sans relancer le beat tracker. Si aucun tempo stable n'est trouvé,
 saisir ou taper le BPM. Le tempo manuel vaut pour le morceau ouvert et n'est pas enregistré dans
 la session ; les réglages de décompte et de clic sont mémorisés localement.

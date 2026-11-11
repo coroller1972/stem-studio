@@ -1,11 +1,12 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 import soundfile as sf
 
-from beat_tracker import infer_downbeat_offset, metric_tempo_candidates, stable_beat_source
+from beat_tracker import LibrosaBeatTracker, infer_downbeat_offset, metric_tempo_candidates, stable_beat_source
 
 
 class StableBeatSourceTests(unittest.TestCase):
@@ -52,3 +53,29 @@ class StableBeatSourceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LibrosaBeatTrackerTests(unittest.TestCase):
+    def test_tracks_the_beat_on_the_percussive_part_of_the_mix(self) -> None:
+        import librosa
+
+        sample_rate = 22_050
+        seconds = 20
+        audio = np.zeros(sample_rate * seconds, dtype=np.float32)
+        burst = int(0.03 * sample_rate)
+        noise = np.random.default_rng(0).standard_normal(burst) * np.exp(-np.arange(burst) / (0.005 * sample_rate))
+        for beat in np.arange(0, seconds - 0.1, 60 / 150):  # a drum hit every beat at 150 BPM
+            start = int(beat * sample_rate)
+            audio[start:start + burst] += 0.5 * noise
+        real_percussive = librosa.effects.percussive
+        with tempfile.TemporaryDirectory() as temporary, \
+                patch.object(librosa.effects, "percussive", side_effect=real_percussive) as percussive:
+            path = Path(temporary) / "mix.wav"
+            sf.write(path, audio, sample_rate)
+            tempo_map = LibrosaBeatTracker().track(path)
+
+        percussive.assert_called_once()
+        self.assertAlmostEqual(tempo_map.bpm, 150, delta=3)
+        times = [beat.time_seconds for beat in tempo_map.beats]
+        self.assertAlmostEqual(60 / float(np.median(np.diff(times))), 150, delta=3)
+

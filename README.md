@@ -466,9 +466,14 @@ Le lancement est identique (`cd app && npm run tauri dev`). Différences avec ma
 
 ```bash
 sudo dnf install rpm-build   # une fois
-scripts/build-linux-rpm.sh
-sudo dnf install app/src-tauri/target/rpmbuild/RPMS/x86_64/stem-studio-*.rpm
+scripts/build-linux-rpm.sh --install
 ```
+
+`--install` installe le paquet avec `sudo dnf install` une fois construit ; sans l'option, le
+script affiche la commande à lancer. Chaque build porte une release horodatée
+(`0.1.0-1.20261111143000.git8c74324.fc44`, date de build puis commit) : `dnf` voit donc toujours
+une version plus récente et met à jour l'application installée, même si la version de
+`tauri.conf.json` n'a pas changé.
 
 Le script gèle le moteur avec PyInstaller depuis `engine/.venv311`, compile le binaire Tauri en
 release (`--no-bundle`) puis appelle `rpmbuild` avec `packaging/linux/stem-studio.spec`. Le paquet

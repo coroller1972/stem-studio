@@ -14,6 +14,16 @@ datas = []
 binaries = []
 hiddenimports = []
 
+# Torch keeps these packages as backward-compatible aliases: each __init__.py
+# swaps itself for the new module in sys.modules, so collect_all("torch") lists
+# submodules with no file of their own, which PyInstaller reports as "Hidden
+# import not found". The real modules are still collected under their new names.
+TORCH_ALIAS_PACKAGES = (
+    "torch.distributed._shard.checkpoint.",
+    "torch.distributed._sharded_tensor.",
+    "torch.distributed._sharding_spec.",
+)
+
 for package in (
     "demucs",
     "bs_roformer",
@@ -33,6 +43,8 @@ for package in (
         package_datas = [
             entry for entry in package_datas if not str(entry[0]).endswith("full.pth")
         ]
+    if package == "torch":
+        package_hidden = [name for name in package_hidden if not name.startswith(TORCH_ALIAS_PACKAGES)]
     datas += package_datas
     binaries += package_binaries
     hiddenimports += package_hidden

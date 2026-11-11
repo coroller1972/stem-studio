@@ -17,7 +17,8 @@
 
 Name:           stem-studio
 Version:        %{app_version}
-Release:        1%{?dist}
+# The build script passes a timestamped release so each local build upgrades the last one.
+Release:        %{?app_release}%{!?app_release:1}%{?dist}
 Summary:        Separate and mix audio stems
 License:        LicenseRef-Proprietary
 ExclusiveArch:  x86_64

@@ -116,8 +116,14 @@ export function useAudioEngine(options: AudioEngineOptions = {}) {
 
   const decodedBytes = useCallback(() => engineRef.current!.decodedBytes, []);
 
+  /** The song time on the audio clock while playing (held still during a count-in), else null. */
+  const playingTime = useCallback(() => {
+    const engine = engineRef.current!;
+    return engine.isPlaying ? engine.currentTime : null;
+  }, []);
+
   return useMemo(
-    () => ({ load, clear, togglePlayback, playFromMarker, seek, getSpectrogram, decodedBytes }),
-    [load, clear, togglePlayback, playFromMarker, seek, getSpectrogram, decodedBytes],
+    () => ({ load, clear, togglePlayback, playFromMarker, seek, getSpectrogram, decodedBytes, playingTime }),
+    [load, clear, togglePlayback, playFromMarker, seek, getSpectrogram, decodedBytes, playingTime],
   );
 }

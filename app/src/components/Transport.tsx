@@ -1,4 +1,5 @@
 import { Flag, Pause, Play, RotateCcw, SkipBack, Volume1, Volume2, VolumeX } from "lucide-react";
+import type { ReactNode } from "react";
 import type { TransportStatus } from "../domain/types";
 import { formatTime } from "../domain/transport";
 
@@ -14,6 +15,8 @@ interface TransportProps {
   onPlayFromMarker: () => void;
   onSetMarker: () => void;
   onMasterVolumeChange: (volume: number) => void;
+  /** Metronome controls, shown between the start marker and the master volume. */
+  metronome?: ReactNode;
 }
 
 export function Transport({
@@ -26,11 +29,12 @@ export function Transport({
   onPlayFromMarker,
   onSetMarker,
   onMasterVolumeChange,
+  metronome,
 }: TransportProps) {
   const isPlaying = status === "playing";
   const MasterVolumeIcon = masterVolume === 0 ? VolumeX : masterVolume < 0.5 ? Volume1 : Volume2;
   return (
-    <footer className="transport">
+    <footer className={metronome ? "transport has-metronome" : "transport"}>
       <div className="transport-controls">
         <button type="button" onClick={onReturnToMarker} title="Return to start marker">
           <SkipBack size={17} fill="currentColor" />
@@ -56,6 +60,7 @@ export function Transport({
         <span>START</span>
         <strong>{formatTime(marker)}</strong>
       </button>
+      {metronome}
       <label className="master-volume">
         <MasterVolumeIcon size={15} aria-hidden="true" />
         <span className="sr-only">Master volume</span>

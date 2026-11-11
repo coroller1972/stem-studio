@@ -1,4 +1,5 @@
 import { clampVolume, createDefaultTracks } from "../domain/mixer";
+import type { MetronomeTempo } from "../domain/metronomeTempo";
 import { STEM_NAMES, type StemName, type StemState, type TempoBeat } from "../domain/types";
 
 /** Written by scripts/export_iphone_package.py. */
@@ -7,12 +8,7 @@ const PACKAGE_VERSION = 1;
 const MANIFEST_NAME = "player.json";
 const MAX_MANIFEST_BYTES = 4 * 1024 * 1024;
 
-export interface PlayerTempo {
-  bpm: number;
-  beatsPerBar: number;
-  beats: TempoBeat[];
-  source: string;
-}
+export type PlayerTempo = MetronomeTempo;
 
 export interface PackageMix {
   startMarkerSeconds: number;

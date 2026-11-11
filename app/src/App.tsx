@@ -5,6 +5,7 @@ import { EmptyState } from "./components/EmptyState";
 import { ErrorView } from "./components/ErrorView";
 import { FrequencyView } from "./components/FrequencyView";
 import { Header } from "./components/Header";
+import { MetronomeControls } from "./components/MetronomeControls";
 import { ProcessingView } from "./components/ProcessingView";
 import { Timeline } from "./components/Timeline";
 import { Transport } from "./components/Transport";
@@ -15,6 +16,7 @@ import {
   type StudioTab,
 } from "./components/TranscriptionWorkspace";
 import { useAudioEngine } from "./hooks/useAudioEngine";
+import { ClickTrack } from "./audio/clickTrack";
 import { spectrogramRange } from "./audio/spectrogram";
 import type {
   BassTranscription,
@@ -31,6 +33,9 @@ import type {
   TranscriptionTrack,
 } from "./domain/types";
 import { resolveTransportKeyboardShortcut } from "./domain/keyboardShortcuts";
+import { buildMetronomeGrid } from "./domain/metronome";
+import { loadMetronomeSettings, saveMetronomeSettings, type MetronomeSettings } from "./domain/metronomeSettings";
+import { chooseTempo, type ManualTempoInput, type TempoSourceId } from "./domain/metronomeTempo";
 import { isTauriRuntime, TauriSeparationService } from "./services/separationService";
 import { TauriSessionService } from "./services/sessionService";
 import { describePlayerPackage, TauriPlayerExportService } from "./services/playerExportService";
@@ -40,13 +45,23 @@ import { ProjectOperations } from "./services/projectOperations";
 
 const AUDIO_EXTENSION = /\.(mp3|wav)$/i;
 const TRANSCRIPTION_BUSY_MESSAGE = "Wait for the transcription to finish, or cancel it, first.";
+const METRONOME_STORAGE_KEY = "stem-studio.metronome";
+/** Unlike the iPhone player, the desktop starts without a count-in so Space plays at once. */
+const DESKTOP_METRONOME_DEFAULTS: MetronomeSettings = { countInBars: 0, songClicks: false, volume: 0.8 };
+const DEFAULT_MANUAL_TEMPO: ManualTempoInput = { bpm: null, beatsPerBar: 4, downbeatSeconds: 0 };
 
 export default function App() {
   const service = useMemo(() => new TauriSeparationService(), []);
   const sessionService = useMemo(() => new TauriSessionService(), []);
   const playerExportService = useMemo(() => new TauriPlayerExportService(), []);
   const transcriptionService = useMemo(() => new TauriTranscriptionService(), []);
-  const audio = useAudioEngine();
+  const clickTrackRef = useRef<ClickTrack | null>(null);
+  clickTrackRef.current ??= new ClickTrack();
+  const clickTrack = clickTrackRef.current;
+  const audio = useAudioEngine({
+    leadInSeconds: (from) => clickTrack.leadInSeconds(from),
+    playbackListener: clickTrack,
+  });
   const operations = useMemo(() => new ProjectOperations(), []);
   const [projectBusy, setProjectBusy] = useState(false);
   useEffect(() => () => operations.dispose(), [operations]);
@@ -62,6 +77,7 @@ export default function App() {
     waveforms: store.waveforms,
     transcriptions: store.transcriptions,
     source: store.source,
+    projectPath: store.projectPath,
     transportStatus: store.transportStatus,
     beginImport: store.beginImport,
     reset: store.reset,
@@ -110,6 +126,36 @@ export default function App() {
   const [bassTuning, setBassTuning] = useState<BassTuning>("beadg");
   const [bassEngine, setBassEngine] = useState<BassTranscriptionEngine>("basic-pitch");
   const [frequencyStem, setFrequencyStem] = useState<SpectralStemName>("vocals");
+  const [metronome, setMetronome] = useState<MetronomeSettings>(
+    () => loadMetronomeSettings(METRONOME_STORAGE_KEY, DESKTOP_METRONOME_DEFAULTS),
+  );
+  const [tempoSource, setTempoSource] = useState<TempoSourceId | null>(null);
+  const [manualTempo, setManualTempo] = useState<ManualTempoInput>(DEFAULT_MANUAL_TEMPO);
+  const drumsTempoMap = useProjectStore((store) => store.transcriptions.drums.result?.transcription.tempoMap ?? null);
+  const bassTempoMap = useProjectStore((store) => store.transcriptions.bass.result?.transcription.tempoMap ?? null);
+  const tempoChoice = useMemo(
+    () => chooseTempo(tempoSource, { drums: drumsTempoMap, bass: bassTempoMap }, manualTempo, state.duration),
+    [tempoSource, drumsTempoMap, bassTempoMap, manualTempo, state.duration],
+  );
+  const metronomeGrid = useMemo(
+    () => (tempoChoice.tempo ? buildMetronomeGrid(tempoChoice.tempo.beats, tempoChoice.tempo.beatsPerBar) : null),
+    [tempoChoice.tempo],
+  );
+
+  // A manual tempo belongs to one song.
+  useEffect(() => {
+    setTempoSource(null);
+    setManualTempo(DEFAULT_MANUAL_TEMPO);
+  }, [state.projectPath]);
+
+  useEffect(() => clickTrack.setGrid(metronomeGrid), [clickTrack, metronomeGrid]);
+
+  useEffect(() => {
+    clickTrack.setCountInBars(metronome.countInBars);
+    clickTrack.setSongClicks(metronome.songClicks);
+    clickTrack.setVolume(metronome.volume);
+    saveMetronomeSettings(METRONOME_STORAGE_KEY, metronome);
+  }, [clickTrack, metronome]);
 
   const importPath = useCallback(
     async (path: string, signal: AbortSignal) => {
@@ -640,6 +686,19 @@ export default function App() {
             onPlayFromMarker={() => void audio.playFromMarker()}
             onSetMarker={() => state.setStartMarker(useProjectStore.getState().currentTime)}
             onMasterVolumeChange={state.setMasterVolume}
+            metronome={
+              <MetronomeControls
+                settings={metronome}
+                onSettingsChange={setMetronome}
+                choice={tempoChoice}
+                bpm={metronomeGrid?.bpm ?? null}
+                onSourceChange={setTempoSource}
+                manual={manualTempo}
+                onManualChange={setManualTempo}
+                playingTime={audio.playingTime}
+                playhead={() => useProjectStore.getState().currentTime}
+              />
+            }
           />
         </main>
       ) : null}

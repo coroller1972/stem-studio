@@ -1719,6 +1719,254 @@ input:focus-visible {
   text-align: right;
 }
 
+.transport.has-metronome {
+  grid-template-columns: auto minmax(170px, 1fr) auto auto minmax(130px, 160px);
+}
+
+.metronome-control {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.metronome-toggle {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid #384149;
+  border-radius: 4px;
+  background: #181d22;
+  color: #8d969f;
+  cursor: pointer;
+}
+
+.metronome-toggle:hover:not(:disabled) {
+  background: #20272d;
+  color: white;
+}
+
+.metronome-toggle[aria-pressed="true"] {
+  border-color: #218eac;
+  background: #176d86;
+  color: white;
+}
+
+.metronome-toggle:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.metronome-readout {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 34px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.metronome-readout:hover,
+.metronome-readout[aria-expanded="true"] {
+  border-color: var(--border);
+  background: var(--surface-hover);
+}
+
+.metronome-readout strong {
+  color: var(--text);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 13px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.metronome-readout span,
+.metronome-readout em {
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 750;
+  letter-spacing: 0.08em;
+}
+
+.metronome-readout em {
+  color: var(--subtle);
+}
+
+.metronome-readout .metronome-count-in {
+  color: var(--cyan);
+}
+
+.metronome-popover {
+  position: absolute;
+  z-index: 30;
+  right: 0;
+  bottom: calc(100% + 12px);
+  display: grid;
+  width: 330px;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--surface-raised);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 45%);
+}
+
+.metronome-field {
+  display: grid;
+  grid-template-columns: 62px 1fr;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+}
+
+.metronome-field > span {
+  color: #cbd1d6;
+}
+
+.metronome-inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.metronome-segments {
+  display: flex;
+  flex: none;
+  justify-self: start;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.metronome-segments button {
+  min-width: 52px;
+  height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-left: 1px solid var(--border);
+  background: #181d22;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.metronome-segments button:first-child {
+  border-left: 0;
+}
+
+.metronome-segments button:hover:not(:disabled):not([aria-pressed="true"]) {
+  background: #20272d;
+  color: white;
+}
+
+.metronome-segments button[aria-pressed="true"] {
+  background: var(--cyan-dim);
+  color: white;
+}
+
+.metronome-segments button:disabled {
+  color: var(--subtle);
+  cursor: default;
+}
+
+.metronome-bpm-input,
+.metronome-field select {
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+
+.metronome-bpm-input {
+  width: 62px;
+  padding: 0 8px;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.metronome-field select {
+  min-width: 0;
+  padding: 0 4px;
+}
+
+.metronome-bpm-input:focus,
+.metronome-field select:focus {
+  border-color: var(--cyan-dim);
+  outline: none;
+}
+
+.metronome-small-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid #384149;
+  border-radius: 4px;
+  background: #181d22;
+  color: #b6bec5;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.metronome-small-button:hover {
+  background: #20272d;
+  color: white;
+}
+
+.metronome-small-button:active {
+  border-color: #218eac;
+  background: #176d86;
+}
+
+.metronome-downbeat {
+  color: var(--amber);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.metronome-volume-input {
+  flex: 1;
+  min-width: 0;
+  height: 3px;
+  margin: 0;
+  appearance: none;
+  border: 0;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--cyan) var(--range-progress), #353d44 var(--range-progress));
+  cursor: pointer;
+}
+
+.metronome-volume-input::-webkit-slider-thumb {
+  width: 12px;
+  height: 12px;
+  appearance: none;
+  border: 1px solid #e1e6e9;
+  border-radius: 50%;
+  background: #c5cdd2;
+}
+
+.metronome-note {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
 .drop-overlay {
   position: fixed;
   z-index: 20;
@@ -1794,6 +2042,14 @@ input:focus-visible {
     padding-inline: 12px;
   }
 
+  .transport.has-metronome {
+    grid-template-columns: auto minmax(130px, 1fr) auto auto minmax(100px, 125px);
+  }
+
+  .metronome-readout em {
+    display: none;
+  }
+
   .track-controls {
     padding-inline: 11px;
   }
@@ -1852,6 +2108,14 @@ input:focus-visible {
     grid-template-columns: auto minmax(118px, 1fr) auto 105px;
     gap: 6px;
     padding-inline: 8px;
+  }
+
+  .transport.has-metronome {
+    grid-template-columns: auto minmax(100px, 1fr) auto auto 90px;
+  }
+
+  .metronome-readout span {
+    display: none;
   }
 
   .transport-controls button {

@@ -7,14 +7,10 @@ import { useAudioEngine } from "../hooks/useAudioEngine";
 import { createDefaultTracks } from "../domain/mixer";
 import { STEM_NAMES, type StemName, type StemPaths } from "../domain/types";
 import { useProjectStore } from "../state/projectStore";
-import { ClickTrack } from "./clickTrack";
-import { buildMetronomeGrid } from "./metronome";
-import {
-  MetronomePanel,
-  loadMetronomeSettings,
-  saveMetronomeSettings,
-  type MetronomeSettings,
-} from "./MetronomePanel";
+import { ClickTrack } from "../audio/clickTrack";
+import { buildMetronomeGrid } from "../domain/metronome";
+import { loadMetronomeSettings, saveMetronomeSettings, type MetronomeSettings } from "../domain/metronomeSettings";
+import { MetronomePanel, PLAYER_METRONOME_STORAGE_KEY } from "./MetronomePanel";
 import { assignStemFiles } from "./stemFiles";
 import { isStemPackageName, parseManifest, readStemPackage, type PackageMix, type PlayerTempo } from "./stemPackage";
 
@@ -39,7 +35,7 @@ export function PlayerApp() {
   const [pickError, setPickError] = useState<string | null>(null);
   const [decodedMegabytes, setDecodedMegabytes] = useState<number | null>(null);
   const [tempo, setTempo] = useState<PlayerTempo | null>(null);
-  const [metronome, setMetronome] = useState<MetronomeSettings>(loadMetronomeSettings);
+  const [metronome, setMetronome] = useState<MetronomeSettings>(() => loadMetronomeSettings(PLAYER_METRONOME_STORAGE_KEY));
   const state = useProjectStore(useShallow((store) => ({
     status: store.status,
     errorMessage: store.errorMessage,
@@ -63,7 +59,7 @@ export function PlayerApp() {
     clickTrack.setCountInBars(metronome.countInBars);
     clickTrack.setSongClicks(metronome.songClicks);
     clickTrack.setVolume(metronome.volume);
-    saveMetronomeSettings(metronome);
+    saveMetronomeSettings(PLAYER_METRONOME_STORAGE_KEY, metronome);
   }, [clickTrack, metronome]);
 
   const loadSong = useCallback(async (song: PickedSong, version: number) => {
